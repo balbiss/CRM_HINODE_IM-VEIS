@@ -176,7 +176,6 @@ interface AppState {
   toggleAutoDiscard: () => void;
   saveFlow: () => void;
 
-  flows: FlowDef[];
   createFlow: (corretor: string, nome: string) => string;
   renameFlow: (id: string, nome: string) => void;
   setFlowGatilho: (id: string, gatilho: string) => void;

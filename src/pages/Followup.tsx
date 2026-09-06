@@ -63,10 +63,9 @@ const basePos = (i: number) => ({ x: 40, y: 160 + i * 155 });
  * `screenToFlowPosition` (useReactFlow) pra converter onde o bloco foi solto em coordenadas do
  * fluxo. Isolado num componente próprio até por isso: o hook não pode ser chamado no mesmo
  * componente que renderiza o Provider, só em um descendente dele. */
-function FlowCanvas({ flow, addBloco, blocoIdSel, setBlocoIdSel }: {
+function FlowCanvas({ flow, addBloco, setBlocoIdSel }: {
   flow: FlowDef;
   addBloco: (flowId: string, tipo: BlocoTipo) => string;
-  blocoIdSel: string | null;
   setBlocoIdSel: (id: string | null) => void;
 }) {
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -336,7 +335,7 @@ export default function Followup() {
 
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                 <ReactFlowProvider>
-                  <FlowCanvas key={flow.id} flow={flow} addBloco={addBloco} blocoIdSel={blocoIdSel} setBlocoIdSel={setBlocoIdSel} />
+                  <FlowCanvas key={flow.id} flow={flow} addBloco={addBloco} setBlocoIdSel={setBlocoIdSel} />
                 </ReactFlowProvider>
 
                 {/* painel do bloco selecionado — só aparece durante a edição, pra dar mais espaço ao canvas o resto do tempo */}
