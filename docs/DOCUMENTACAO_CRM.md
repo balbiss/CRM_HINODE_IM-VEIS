@@ -2,7 +2,9 @@
 
 > Apelido interno do projeto: **CRM Hinode**. Rebuild v2, independente, do CRM em produção da imobiliária "Hinode Imóveis" (o sistema original em produção é outro projeto, chamado internamente de "CRM OKA" — este aqui **não compartilha banco, código nem infraestrutura** com ele).
 
-Última atualização: 2026-09-05 (Follow-up: drag-and-drop de verdade da paleta pro canvas, efeito corrente ao arrastar, 2 bugs reais corrigidos — ainda só front/mock).
+Repositório: [`github.com/balbiss/CRM_HINODE_IM-VEIS`](https://github.com/balbiss/CRM_HINODE_IM-VEIS) — toda atualização de código deste projeto é commitada e enviada pra lá.
+
+Última atualização: 2026-09-06 (Conversas real + áudio/emoji no chat; 10.043 leads reais e 12 perfis reais importados do CRM OKA de produção pro banco local; endpoint de captação (`/api/captacao/facebook`) + workflow n8n de captação via Facebook Graph API, criado e pronto porém inativo até o backend ser deployado publicamente).
 
 ## O que é
 
@@ -211,6 +213,14 @@ A aba Follow-up (`src/pages/Followup.tsx`) é um construtor visual estilo **Many
 - O CSS padrão da lib (`@xyflow/react/dist/style.css`) é sempre claro. Sobrescrever `.react-flow__controls-button { background: ... }` direto **não é suficiente** — o React Flow v12 lê variáveis CSS próprias com fallback (`--xy-controls-button-background-color` e afins), e por ordem de import a regra da lib pode vencer um simples override de mesma especificidade. O jeito que funciona de verdade: setar essas variáveis `--xy-controls-*` no `:root` de `src/index.css`, apontando pras variáveis de tema do app.
 - A coluna esquerda do Follow-up (corretor/fluxos/paleta de blocos) é `position:'sticky'` com rolagem própria, pra continuar acessível mesmo com a página rolada.
 
+## Captação de leads via Facebook (n8n)
+
+Réplica do fluxo real de produção do CRM OKA ("FACEBOOK FORM - CAPTAÇÃO LEADS", n8n.inoovaweb.cloud) — **sem tocar no workflow original**, já que o Facebook só permite uma URL de callback por App/assinatura de evento (não dá pra apontar o mesmo webhook pra dois sistemas diferentes sem criar um segundo App).
+
+- **Endpoint novo no backend**: `POST /api/captacao/facebook` (`server/src/routes/captacao.ts`) — **não usa `requireAuth`** (uma automação não mantém sessão de usuário); protegido por um segredo compartilhado no header `x-captacao-secret`, comparado contra `CAPTACAO_SECRET` (env). Cria o lead direto na coluna "Lead Novo", canal `Facebook`.
+- **Workflow n8n dedicado** (`HINODE - FACEBOOK FORM - CAPTAÇÃO LEADS (CRM Hinode)`, mesma instância n8n.inoovaweb.cloud): em vez de depender do mesmo webhook da produção, esse workflow **busca leads novos periodicamente via Facebook Graph API** (Schedule Trigger a cada 5 min → lista formulários ativos da página → busca leads de cada formulário criados depois do último polling → monta o payload → `POST /api/captacao/facebook`). Reaproveita a mesma credencial Graph API já cadastrada (`CRM HINODE PERNAMENTE`) e a mesma página do Facebook — zero mudança na configuração da Meta, zero mudança no workflow de produção.
+- **Criado mas INATIVO de propósito**: o backend do CRM Hinode ainda só roda local, sem endereço público que o n8n (na nuvem) consiga alcançar. Antes de ativar: (1) deployar o backend publicamente (domínio já reservado: `hinode.inoovaweb.com.br`), (2) rodar "Test workflow" manualmente uma vez, (3) só então ativar o toggle no n8n.
+
 ## Realtime
 
 Socket.io, uma room por imobiliária (`imobiliaria:<id>`), handshake autenticado por JWT. Eventos: `lead:created`, `lead:updated`. O front escuta e faz upsert local sem precisar recarregar a página.
@@ -221,6 +231,8 @@ Socket.io, uma room por imobiliária (`imobiliaria:<id>`), handshake autenticado
 
 ⚠️ **O seed é destrutivo** — ele limpa as tabelas antes de inserir. Seguro em dev; **não pode ser rodado em produção depois que houver dado real**.
 
+**Dado real importado (além do seed, 2026-09-06):** os **10.043 leads reais** e os **12 perfis reais da equipe** do CRM OKA (produção) foram copiados pro Postgres local, pra validar o sistema com dado de verdade — ver detalhe completo do mapeamento de schema/status/corretor na memória do projeto. **Rodar `npm run db:seed` de novo APAGA esse dado importado** junto com o resto (o seed limpa a tabela `leads`/`perfis` inteira) — se precisar do dado real de novo depois de um `db:seed`, a importação precisa ser refeita (script não fica versionado no repo de propósito, por conter token de acesso).
+
 ## Pendências conhecidas (não é bug, é trabalho ainda não feito)
 
 - Nenhum Dockerfile ainda (nem front nem back) — necessário antes de qualquer deploy.
@@ -230,6 +242,7 @@ Socket.io, uma room por imobiliária (`imobiliaria:<id>`), handshake autenticado
 - Módulos ainda mock listados na tabela acima.
 - Semântica de "Remover Acesso (Seguro)" na Equipe ainda não definida (ver seção Equipe acima).
 - Conversas ainda não manda mensagem de verdade pro WhatsApp (só persiste no CRM) — integração real com WAHA adiada de propósito (ver seção Conversas acima). Consequência direta: também não existe check mark de entregue/lido nas mensagens enviadas.
+- Workflow n8n de captação de leads do Facebook está pronto mas **inativo** — falta deployar o backend publicamente antes de ativar (ver seção Captação de leads acima).
 
 ## Convenção de documentação
 
