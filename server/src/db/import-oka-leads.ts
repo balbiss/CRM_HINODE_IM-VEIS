@@ -86,9 +86,30 @@ function origemParaCanal(origem: string | null): 'WhatsApp' | 'Instagram' | 'Ind
   return 'Facebook';
 }
 
+const COLS_BASE = [
+  { titulo: 'Lead Novo', cor: 'var(--muted)' },
+  { titulo: 'Em Atendimento', cor: 'var(--terra)' },
+  { titulo: 'Análise de Crédito', cor: 'var(--terra)' },
+  { titulo: 'Visita Agendada', cor: 'var(--terra)' },
+  { titulo: 'Proposta', cor: 'var(--terra)' },
+  { titulo: 'Venda Concluída', cor: 'var(--olive)' },
+  { titulo: 'Rebatida', cor: 'var(--muted)' },
+];
+
 async function main() {
-  const [imob] = await db.select().from(imobiliarias).limit(1);
-  if (!imob) throw new Error('Nenhuma imobiliária local — rode a migração/seed base primeiro');
+  let [imob] = await db.select().from(imobiliarias).limit(1);
+  if (!imob) {
+    console.log('Nenhuma imobiliária ainda — criando a base (sem dado de demonstração)...');
+    [imob] = await db.insert(imobiliarias).values({ nome: 'Hinode Imóveis' }).returning();
+  }
+
+  const colunasExistentes = await db.select().from(colunasKanban).where(eq(colunasKanban.imobiliariaId, imob.id));
+  if (colunasExistentes.length === 0) {
+    await db.insert(colunasKanban).values(
+      COLS_BASE.map((c, i) => ({ imobiliariaId: imob.id, titulo: c.titulo, ordem: i, cor: c.cor })),
+    );
+    console.log('  colunas do kanban criadas');
+  }
 
   console.log('Limpando leads fantasma e corretores de demonstração...');
   const leadsFantasmaRemovidos = await db.delete(leads)
