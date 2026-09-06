@@ -38,3 +38,23 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   if (!perfil) return res.status(404).json({ error: 'Perfil não encontrado' });
   res.json({ id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, telefone: perfil.telefone });
 });
+
+const senhaSchema = z.object({
+  senhaAtual: z.string().min(1),
+  senhaNova: z.string().min(6),
+});
+
+authRouter.patch('/senha', requireAuth, async (req, res) => {
+  const parsed = senhaSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Senha nova precisa ter pelo menos 6 caracteres' });
+
+  const [perfil] = await db.select().from(perfis).where(eq(perfis.id, req.auth!.sub)).limit(1);
+  if (!perfil) return res.status(404).json({ error: 'Perfil não encontrado' });
+
+  const ok = await bcrypt.compare(parsed.data.senhaAtual, perfil.senhaHash);
+  if (!ok) return res.status(401).json({ error: 'Senha atual incorreta' });
+
+  const senhaHash = await bcrypt.hash(parsed.data.senhaNova, 10);
+  await db.update(perfis).set({ senhaHash }).where(eq(perfis.id, perfil.id));
+  res.json({ ok: true });
+});
