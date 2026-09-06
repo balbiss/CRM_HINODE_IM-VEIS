@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, integer, numeric, timestamp, pgEnum, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, numeric, timestamp, pgEnum, jsonb, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const roleEnum = pgEnum('role', ['dono', 'gerente', 'corretor']);
@@ -25,7 +25,9 @@ export const perfis = pgTable('perfis', {
   bloqueado: boolean('bloqueado').notNull().default(false),
   emPlantao: boolean('em_plantao').notNull().default(false),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  imobiliariaIdx: index('perfis_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
 
 export const colunasKanban = pgTable('colunas_kanban', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -34,7 +36,9 @@ export const colunasKanban = pgTable('colunas_kanban', {
   ordem: integer('ordem').notNull().default(0),
   cor: text('cor'),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  imobiliariaIdx: index('colunas_kanban_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
 
 export const leads = pgTable('leads', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -54,7 +58,14 @@ export const leads = pgTable('leads', {
   rendaDeclarada: numeric('renda_declarada', { precision: 14, scale: 2 }),
   entrouNaColunaEm: timestamp('entrou_na_coluna_em', { withTimezone: true }).notNull().defaultNow(),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  // Postgres não indexa FK automaticamente — sem isso, toda listagem de leads (a query mais
+  // comum do app) fazia sequential scan na tabela inteira (ficou visível só depois que a tabela
+  // passou a ter 10k+ linhas reais, nunca doeu com o seed de demonstração de 10 linhas).
+  imobiliariaIdx: index('leads_imobiliaria_id_idx').on(table.imobiliariaId),
+  corretorIdx: index('leads_corretor_id_idx').on(table.corretorId),
+  colunaIdx: index('leads_coluna_id_idx').on(table.colunaId),
+}));
 
 // A disponibilidade em si mora em perfis.emPlantao — esta tabela guarda só a ordem da fila.
 export const filasAtendimento = pgTable('filas_atendimento', {
@@ -75,7 +86,9 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   anexoTipo: text('anexo_tipo'), // 'imagem' | 'video' | 'documento'
   canal: mensagemCanalEnum('canal').notNull().default('corretor'),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  leadIdx: index('mensagens_lead_id_idx').on(table.leadId),
+}));
 
 export const followupFluxos = pgTable('followup_fluxos', {
   id: uuid('id').primaryKey().defaultRandom(),

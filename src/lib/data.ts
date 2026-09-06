@@ -79,6 +79,7 @@ export interface Lead {
   campanha: string;
   motivo: string;
   renda: number;
+  entrouNaColunaEm?: string;
 }
 
 export function buildLeads(): Lead[] {

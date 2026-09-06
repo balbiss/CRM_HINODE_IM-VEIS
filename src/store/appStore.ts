@@ -40,6 +40,12 @@ export interface RemoteMensagem {
   anexoUrl: string | null; anexoTipo: AnexoTipo | null; canal: 'corretor' | 'followup'; enviadoEm: string;
 }
 
+/** Resumo da última mensagem de um lead — usado só pra saber QUAIS leads já tiveram interação
+ * de verdade (Conversas não pode listar todo mundo da base, com 10k+ leads isso é inviável). */
+export interface RemoteConversa {
+  leadId: string; texto: string | null; anexoTipo: AnexoTipo | null; direcao: 'in' | 'out'; enviadoEm: string;
+}
+
 function mapRemoteMensagem(r: RemoteMensagem): ChatMsg {
   const dt = new Date(r.enviadoEm);
   const off = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 86400000));
@@ -88,6 +94,7 @@ interface AppState {
   leadId: string | null;
   leadTab: LeadTab;
   chats: Record<string, ChatMsg[]>;
+  conversas: RemoteConversa[];
   draft: string;
   typing: boolean;
 
@@ -149,6 +156,7 @@ interface AppState {
   sendMsg: () => void;
   fetchMensagens: (leadId: string) => void;
   enviarMensagem: (leadId: string, input: { texto?: string; anexoUrl?: string; anexoTipo?: AnexoTipo }) => Promise<void>;
+  fetchConversas: () => void;
 
   pickConv: (id: string) => void;
   sendConv: () => void;
@@ -286,6 +294,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   leadId: null,
   leadTab: 'detalhes',
   chats: {},
+  conversas: [],
   draft: '',
   typing: false,
 
@@ -358,6 +367,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().fetchLinksUteis();
       get().fetchTreinamentos();
       get().fetchNotificacoes();
+      get().fetchConversas();
       return true;
     } catch (e) {
       set({ authError: (e as ApiError).message || 'Não foi possível entrar', authLoading: false });
@@ -367,7 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   logout: () => {
     localStorage.removeItem('nova_token');
     disconnectSocket();
-    set({ token: null, me: null, leads: [], colunasRemotas: [], perfisRemotos: [], templates: [], imoveis: [], linksUteis: [], treinamentos: [], notificacoes: [] });
+    set({ token: null, me: null, leads: [], colunasRemotas: [], perfisRemotos: [], templates: [], imoveis: [], linksUteis: [], treinamentos: [], notificacoes: [], conversas: [] });
   },
   hydrateAuth: () => {
     const token = localStorage.getItem('nova_token');
@@ -383,6 +393,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().fetchLinksUteis();
         get().fetchTreinamentos();
       get().fetchNotificacoes();
+      get().fetchConversas();
       })
       .catch(() => { localStorage.removeItem('nova_token'); set({ token: null, me: null, authLoading: false }); });
   },
@@ -420,10 +431,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     socket.off('mensagem:created').on('mensagem:created', (row: RemoteMensagem) => {
       set(s => {
+        const resumo: RemoteConversa = { leadId: row.leadId, texto: row.texto, anexoTipo: row.anexoTipo, direcao: row.direcao, enviadoEm: row.enviadoEm };
+        const semEsse = s.conversas.filter(c => c.leadId !== row.leadId);
+        const conversas = [resumo, ...semEsse];
+
         const lista = s.chats[row.leadId];
-        if (!lista) return s; // conversa não está aberta agora — não precisa manter em memória
-        if (lista.some(m => m.id === row.id)) return s;
-        return { chats: { ...s.chats, [row.leadId]: [...lista, mapRemoteMensagem(row)] } };
+        if (!lista) return { conversas }; // conversa não está aberta agora — não precisa manter em memória
+        if (lista.some(m => m.id === row.id)) return { conversas };
+        return { conversas, chats: { ...s.chats, [row.leadId]: [...lista, mapRemoteMensagem(row)] } };
       });
     });
   },
@@ -490,6 +505,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     apiFetch<RemoteMensagem[]>('/api/mensagens/' + leadId, token)
       .then(rows => set(s => ({ chats: { ...s.chats, [leadId]: rows.map(mapRemoteMensagem) } })))
       .catch(() => get().toast('Não foi possível carregar a conversa'));
+  },
+  fetchConversas: () => {
+    const token = get().token;
+    if (!token) return;
+    apiFetch<RemoteConversa[]>('/api/mensagens', token)
+      .then(conversas => set({ conversas }))
+      .catch(() => {});
   },
   enviarMensagem: async (leadId, input) => {
     const token = get().token;

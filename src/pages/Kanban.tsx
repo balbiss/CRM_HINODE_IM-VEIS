@@ -203,13 +203,18 @@ export default function Kanban() {
                           <span style={{ flex: 1, minWidth: 0 }}>
                             <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
                             <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{l.imovel}</span>
+                            {l.campanha && <span style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }} title={l.campanha}>📢 {l.campanha}</span>}
                           </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 11 }}>
                           <span style={css(canalPill(l.canal))}>{l.canal}</span>
                           {l.segundo && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', padding: '3px 7px', border: '1px solid var(--terra)', color: 'var(--terra)', borderRadius: 20 }}>2º cadastro</span>}
-                          <span style={{ flex: 1 }} />
-                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{l.dias === 0 ? 'hoje' : l.dias + 'd na coluna'}</span>
+                          {l.corretor && <span style={{ fontSize: 11, color: 'var(--terra)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.corretor}</span>}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>
+                          {l.entrouNaColunaEm
+                            ? new Date(l.entrouNaColunaEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+                            : (l.dias === 0 ? 'hoje' : l.dias + 'd na coluna')}
                         </div>
                       </div>
                     ))}

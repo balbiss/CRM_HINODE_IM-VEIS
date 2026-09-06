@@ -13,6 +13,7 @@ import { EmojiPicker } from '../components/EmojiPicker';
 export default function Conversas() {
   const allLeads = useAppStore(s => s.leads);
   const chats = useAppStore(s => s.chats);
+  const conversas = useAppStore(s => s.conversas);
   const token = useAppStore(s => s.token);
   const enviarMensagem = useAppStore(s => s.enviarMensagem);
   const toast = useAppStore(s => s.toast);
@@ -34,11 +35,17 @@ export default function Conversas() {
 
   const thread = (l: Lead) => chats[l.id] || [];
 
+  // Conversas com dado real (10k+ leads na base): só listar quem já teve alguma mensagem de
+  // verdade, não todo mundo — senão a lista fica enorme e inútil (maioria nunca falou pelo CRM).
+  const conversaPorLead = useMemo(() => new Map(conversas.map(c => [c.leadId, c])), [conversas]);
+
   const q = (convQuery || '').trim().toLowerCase();
   const convBase = useMemo(() => allLeads
+    .filter(l => conversaPorLead.has(l.id))
     .filter(l => (isManager ? (convCorretor === 'Todos os corretores' || l.corretor === convCorretor) : l.corretor === meNome))
     .filter(l => !q || l.nome.toLowerCase().includes(q) || (q.replace(/\D/g, '') !== '' && l.tel.replace(/\D/g, '').includes(q.replace(/\D/g, ''))))
-    .sort((a, b) => a.dias - b.dias || a.id.localeCompare(b.id)), [allLeads, isManager, convCorretor, meNome, q]);
+    .sort((a, b) => new Date(conversaPorLead.get(b.id)!.enviadoEm).getTime() - new Date(conversaPorLead.get(a.id)!.enviadoEm).getTime()),
+    [allLeads, conversaPorLead, isManager, convCorretor, meNome, q]);
 
   const CL = convBase.find(l => l.id === convId);
   const convThread = mapMsgs(CL ? thread(CL) : []);
@@ -70,9 +77,11 @@ export default function Conversas() {
           </div>
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {convBase.map(l => {
-              const th = thread(l);
-              const last = th[th.length - 1] || { texto: '', hora: '', side: 'in' as const, off: 0, anexoTipo: null };
-              const legendaAnexo = last.anexoTipo === 'imagem' ? '📷 Foto' : last.anexoTipo === 'video' ? '🎞️ Vídeo' : last.anexoTipo === 'documento' ? '📎 Documento' : last.anexoTipo === 'audio' ? '🎤 Áudio' : last.texto;
+              const resumo = conversaPorLead.get(l.id);
+              const legendaAnexo = resumo?.anexoTipo === 'imagem' ? '📷 Foto' : resumo?.anexoTipo === 'video' ? '🎞️ Vídeo' : resumo?.anexoTipo === 'documento' ? '📎 Documento' : resumo?.anexoTipo === 'audio' ? '🎤 Áudio' : resumo?.texto;
+              const dataMsg = resumo ? new Date(resumo.enviadoEm) : null;
+              const horaMsg = dataMsg ? dataMsg.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+              const diasMsg = dataMsg ? Math.max(0, Math.floor((Date.now() - dataMsg.getTime()) / 86400000)) : 0;
               const on = convId === l.id;
               return (
                 <button
@@ -84,11 +93,11 @@ export default function Conversas() {
                   <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
-                      <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{last.off == null || last.off === 0 ? last.hora : dayLabel(last.off) + ' ' + last.hora}</span>
+                      <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{diasMsg === 0 ? horaMsg : dayLabel(diasMsg) + ' ' + horaMsg}</span>
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: l.canal === 'WhatsApp' ? 'var(--olive)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terra)' : 'var(--muted)' }} />
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(last.side === 'out' ? 'Você: ' : '') + legendaAnexo}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(resumo?.direcao === 'out' ? 'Você: ' : '') + legendaAnexo}</span>
                     </span>
                   </span>
                 </button>

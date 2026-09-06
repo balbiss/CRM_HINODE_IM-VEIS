@@ -4,6 +4,8 @@
 
 Repositório: [`github.com/balbiss/CRM_HINODE_IM-VEIS`](https://github.com/balbiss/CRM_HINODE_IM-VEIS) — toda atualização de código deste projeto é commitada e enviada pra lá.
 
+**🟢 EM PRODUÇÃO desde 2026-09-06**: [`https://hinode.inoovaweb.com.br`](https://hinode.inoovaweb.com.br), com **10.048 leads reais + 12 perfis reais** importados do CRM OKA (produção).
+
 Última atualização: 2026-09-06 (Conversas real + áudio/emoji no chat; 10.043 leads reais e 12 perfis reais importados do CRM OKA de produção pro banco local; endpoint de captação (`/api/captacao/facebook`) + workflow n8n de captação via Facebook Graph API, criado e pronto porém inativo até o backend ser deployado publicamente).
 
 ## O que é

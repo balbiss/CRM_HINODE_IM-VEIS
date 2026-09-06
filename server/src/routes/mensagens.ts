@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, mensagensWhatsapp } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -18,6 +18,32 @@ async function carregarLeadAutorizado(leadId: string, imobiliariaId: string, rol
 export function mensagensRouter(io: SocketServer) {
   const router = Router();
   router.use(requireAuth);
+
+  // Lista só os leads que JÁ tiveram alguma mensagem de verdade — evita a tela de Conversas
+  // ter que lidar com todo mundo da base (com 10k+ leads reais, isso ficava enorme e inútil,
+  // já que a maioria nunca trocou mensagem nenhuma pelo CRM ainda).
+  router.get('/', async (req, res) => {
+    const { imobiliariaId, role, sub } = req.auth!;
+    const scoped = role === 'corretor'
+      ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      : eq(leads.imobiliariaId, imobiliariaId);
+
+    const rows = await db.select({
+      leadId: mensagensWhatsapp.leadId,
+      texto: mensagensWhatsapp.texto,
+      anexoTipo: mensagensWhatsapp.anexoTipo,
+      direcao: mensagensWhatsapp.direcao,
+      enviadoEm: mensagensWhatsapp.enviadoEm,
+    })
+      .from(mensagensWhatsapp)
+      .innerJoin(leads, eq(leads.id, mensagensWhatsapp.leadId))
+      .where(scoped)
+      .orderBy(desc(mensagensWhatsapp.enviadoEm));
+
+    const ultimaPorLead = new Map<string, typeof rows[number]>();
+    for (const row of rows) if (!ultimaPorLead.has(row.leadId)) ultimaPorLead.set(row.leadId, row);
+    res.json([...ultimaPorLead.values()]);
+  });
 
   router.get('/:leadId', async (req, res) => {
     const { imobiliariaId, role, sub } = req.auth!;
