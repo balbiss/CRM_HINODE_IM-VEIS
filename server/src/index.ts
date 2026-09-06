@@ -15,6 +15,7 @@ import { linksUteisRouter } from './routes/linksUteis.js';
 import { treinamentosRouter } from './routes/treinamentos.js';
 import { notificacoesRouter } from './routes/notificacoes.js';
 import { mensagensRouter } from './routes/mensagens.js';
+import { captacaoRouter } from './routes/captacao.js';
 import { verifyToken } from './lib/jwt.js';
 import { ensureBucket } from './lib/storage.js';
 
@@ -55,6 +56,7 @@ app.use('/api/leads', leadsRouter(io));
 app.use('/api/filas', filasRouter(io));
 app.use('/api/perfis', perfisRouter(io));
 app.use('/api/mensagens', mensagensRouter(io));
+app.use('/api/captacao', captacaoRouter(io));
 
 const port = Number(process.env.PORT) || 3001;
 ensureBucket()
