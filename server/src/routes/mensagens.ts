@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, mensagensWhatsapp } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
+import { despacharPeloWhatsapp } from './whatsapp.js';
 import type { Server as SocketServer } from 'socket.io';
 
 /** Carrega o lead e confere que quem está pedindo pode ver essa conversa: precisa ser da mesma
@@ -42,7 +43,16 @@ export function mensagensRouter(io: SocketServer) {
 
     const ultimaPorLead = new Map<string, typeof rows[number]>();
     for (const row of rows) if (!ultimaPorLead.has(row.leadId)) ultimaPorLead.set(row.leadId, row);
-    res.json([...ultimaPorLead.values()]);
+
+    // não lidas (recebidas e ainda não vistas) por lead
+    const naoLidas = await db.select({ leadId: mensagensWhatsapp.leadId, n: sql<number>`count(*)::int` })
+      .from(mensagensWhatsapp)
+      .innerJoin(leads, eq(leads.id, mensagensWhatsapp.leadId))
+      .where(and(scoped, eq(mensagensWhatsapp.direcao, 'in'), eq(mensagensWhatsapp.lida, false)))
+      .groupBy(mensagensWhatsapp.leadId);
+    const nlMap = new Map(naoLidas.map(r => [r.leadId, r.n]));
+
+    res.json([...ultimaPorLead.values()].map(r => ({ ...r, naoLidas: nlMap.get(r.leadId) ?? 0 })));
   });
 
   router.get('/:leadId', async (req, res) => {
@@ -53,6 +63,13 @@ export function mensagensRouter(io: SocketServer) {
     const rows = await db.select().from(mensagensWhatsapp)
       .where(eq(mensagensWhatsapp.leadId, req.params.leadId))
       .orderBy(asc(mensagensWhatsapp.enviadoEm));
+
+    // abrir a conversa marca as recebidas como lidas
+    await db.update(mensagensWhatsapp)
+      .set({ lida: true })
+      .where(and(eq(mensagensWhatsapp.leadId, req.params.leadId), eq(mensagensWhatsapp.direcao, 'in'), eq(mensagensWhatsapp.lida, false)));
+    io.to('imobiliaria:' + imobiliariaId).emit('conversa:lida', { leadId: req.params.leadId });
+
     res.json(rows);
   });
 
@@ -60,6 +77,7 @@ export function mensagensRouter(io: SocketServer) {
     texto: z.string().min(1).optional(),
     anexoUrl: z.string().min(1).optional(),
     anexoTipo: z.enum(['imagem', 'video', 'documento', 'audio']).optional(),
+    anexoNome: z.string().optional(),
   }).refine(b => !!b.texto || !!b.anexoUrl, { message: 'Mensagem precisa ter texto ou anexo' });
 
   router.post('/:leadId', async (req, res) => {
@@ -70,17 +88,25 @@ export function mensagensRouter(io: SocketServer) {
     if (lead === null) return res.status(404).json({ error: 'Lead não encontrado' });
     if (lead === undefined) return res.status(403).json({ error: 'Sem permissão para enviar nesta conversa' });
 
-    // Envio real via WAHA entra numa próxima etapa — por enquanto só persiste a mensagem do
-    // corretor (direção "out"). Não fabricamos resposta automática do lead.
     const [row] = await db.insert(mensagensWhatsapp).values({
-      leadId: req.params.leadId, direcao: 'out', canal: 'corretor',
+      leadId: req.params.leadId, direcao: 'out', canal: 'corretor', enviadoPor: sub, ackStatus: 1,
       texto: parsed.data.texto ?? null,
       anexoUrl: parsed.data.anexoUrl ?? null,
       anexoTipo: parsed.data.anexoTipo ?? null,
+      anexoNome: parsed.data.anexoNome ?? null,
     }).returning();
 
     io.to('imobiliaria:' + imobiliariaId).emit('mensagem:created', row);
     res.status(201).json(row);
+
+    // dispara pelo WhatsApp (central ou do corretor) sem travar a resposta;
+    // se não houver sessão conectada, a mensagem fica só no histórico do CRM.
+    despacharPeloWhatsapp({
+      imobiliariaId, telefone: lead.telefone, corretorId: lead.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
+      texto: parsed.data.texto, anexoUrl: parsed.data.anexoUrl, anexoTipo: parsed.data.anexoTipo, anexoNome: parsed.data.anexoNome,
+    })
+      .then(r => { if (!r.enviado && r.erro && r.erro !== 'WAHA não configurado' && r.erro !== 'nenhuma sessão conectada') console.warn('WhatsApp não enviou:', r.erro); })
+      .catch(() => {});
   });
 
   return router;

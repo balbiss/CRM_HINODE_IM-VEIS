@@ -1,32 +1,47 @@
-# React + TypeScript + Vite
+# CRM Hinode
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+CRM imobiliário sob medida pra Hinode Imóveis: funil de leads em Kanban, roleta de distribuição
+automática entre corretores, follow-up de WhatsApp, análise de crédito, catálogo de imóveis, site
+público de imóveis, captação de leads do Facebook/site, etiquetas, tarefas/agenda e histórico do lead.
 
-Currently, two official plugins are available:
+- **Frontend** (`/`): Vite + React 19 + TypeScript + Zustand + Socket.io-client, PWA.
+- **Backend** (`server/`): Node + Express + TypeScript, Drizzle ORM + PostgreSQL, Socket.io, MinIO (S3) para arquivos.
+- **WhatsApp**: [WAHA](https://waha.devlike.pro/) (engine GOWS). Opcional — sem ele o CRM funciona, só não envia/recebe no WhatsApp.
+- **Produção**: `https://hinode.inoovaweb.com.br` (deploy via GitHub Actions + Docker Swarm/Portainer).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Documentação
 
-## React Compiler
+| Documento | Assunto |
+|---|---|
+| [`docs/DOCUMENTACAO_CRM.md`](docs/DOCUMENTACAO_CRM.md) | Como o CRM funciona: arquitetura, módulos, regras de negócio, papéis de acesso |
+| [`docs/INSTALACAO.md`](docs/INSTALACAO.md) | O que é preciso e como instalar (dev local e produção) |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Início rápido (desenvolvimento local)
 
-## Expanding the Oxlint configuration
+Pré-requisitos: **Node 22+**, **Docker** (para Postgres + MinIO).
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+```bash
+# 1. Postgres + MinIO
+docker compose up -d
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+# 2. Backend
+cd server
+cp .env.example .env            # ajuste os segredos
+npm install
+npm run db:migrate              # cria/atualiza o schema
+npm run db:seed                 # imobiliária + contas + dados de demonstração
+npm run dev                     # http://localhost:3001
+
+# 3. Frontend (outro terminal, na raiz)
+npm install
+npm run dev                     # http://localhost:5173
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Detalhes completos (variáveis de ambiente, WAHA, deploy em produção, migrações) em
+[`docs/INSTALACAO.md`](docs/INSTALACAO.md).
+
+## Scripts
+
+**Frontend** (raiz): `npm run dev` · `npm run build` (`tsc -b && vite build`) · `npm run lint` (oxlint) · `npm run preview`
+
+**Backend** (`server/`): `npm run dev` (tsx watch) · `npm run build` (`tsc`) · `npm start` · `npm run db:generate` (gera migração a partir do schema) · `npm run db:migrate` · `npm run db:seed`

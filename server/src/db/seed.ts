@@ -18,13 +18,13 @@ const CORRETORES = [
 ];
 
 const COLS = [
-  { titulo: 'Lead Novo', cor: 'var(--muted)' },
-  { titulo: 'Em Atendimento', cor: 'var(--terra)' },
-  { titulo: 'Análise de Crédito', cor: 'var(--terra)' },
-  { titulo: 'Visita Agendada', cor: 'var(--terra)' },
-  { titulo: 'Proposta', cor: 'var(--terra)' },
-  { titulo: 'Venda Concluída', cor: 'var(--olive)' },
-  { titulo: 'Rebatida', cor: 'var(--muted)' },
+  { titulo: 'Lead Novo', cor: 'var(--muted)', slug: 'novo' },
+  { titulo: 'Em Atendimento', cor: 'var(--terra)', slug: 'atend' },
+  { titulo: 'Análise de Crédito', cor: 'var(--terra)', slug: 'credito' },
+  { titulo: 'Visita Agendada', cor: 'var(--terra)', slug: 'visita' },
+  { titulo: 'Proposta', cor: 'var(--terra)', slug: 'proposta' },
+  { titulo: 'Venda Concluída', cor: 'var(--olive)', slug: 'venda' },
+  { titulo: 'Rebatida', cor: 'var(--muted)', slug: 'rebatida' },
 ];
 
 const IMOVEIS = [
@@ -56,6 +56,7 @@ async function main() {
   await db.delete(schema.mensagensWhatsapp);
   await db.delete(schema.leads);
   await db.delete(schema.filasAtendimento);
+  await db.delete(schema.roletas);
   await db.delete(schema.colunasKanban);
   await db.delete(schema.perfis);
   await db.delete(schema.imoveis);
@@ -78,7 +79,7 @@ async function main() {
   console.log('Seed:', perfisRows.length, 'perfis criados (senha padrão: 123456; Dono usa senha própria)');
 
   const colunasRows = await db.insert(schema.colunasKanban).values(
-    COLS.map((c, i) => ({ imobiliariaId: imob.id, titulo: c.titulo, ordem: i, cor: c.cor })),
+    COLS.map((c, i) => ({ imobiliariaId: imob.id, titulo: c.titulo, ordem: i, cor: c.cor, slug: c.slug })),
   ).returning();
 
   const colunaByTitulo = new Map(colunasRows.map(c => [c.titulo, c.id]));
@@ -88,8 +89,9 @@ async function main() {
   // Dono/Gerente logam e veem os 10.
   const corretoresRows = perfisRows.filter(p => p.role === 'corretor');
 
+  const [roletaGeral] = await db.insert(schema.roletas).values({ imobiliariaId: imob.id, nome: 'Geral', padrao: true, ordem: 0 }).returning();
   await db.insert(schema.filasAtendimento).values(
-    corretoresRows.map((p, i) => ({ imobiliariaId: imob.id, corretorId: p.id, posicao: i })),
+    corretoresRows.map((p, i) => ({ imobiliariaId: imob.id, roletaId: roletaGeral.id, corretorId: p.id, posicao: i })),
   );
 
   const leadsRows = await db.insert(schema.leads).values(
@@ -100,6 +102,11 @@ async function main() {
         nome: l.nome,
         telefone: '(11) 9' + (8000 + i * 37) + '-' + (1000 + i * 13),
         email: l.nome.toLowerCase().replace(/ /g, '.') + '@email.com',
+        // Alguns leads com foto de perfil (simula o avatar do WhatsApp vindo da captação);
+        // os demais ficam sem, pra validar o placeholder listrado.
+        fotoUrl: i % 3 === 0
+          ? 'https://randomuser.me/api/portraits/' + (i % 2 ? 'women/' : 'men/') + (10 + i * 7) + '.jpg'
+          : null,
         imovelTitulo: im[0],
         imovelSub: im[1],
         valor: String(im[2]),

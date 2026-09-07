@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
-import { Paperclip } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Paperclip, Flag } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { CORRETORES, mapMsgs, type Lead } from '../lib/data';
-import { ini, canalPill, dayLabel } from '../lib/format';
+import { mapMsgs, type Lead } from '../lib/data';
+import { Visto } from '../components/Visto';
+import { ChatAvatar } from '../components/ChatAvatar';
+import { canalPill, dayLabel } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from '../components/AnexoMensagem';
@@ -14,6 +16,8 @@ export default function Conversas() {
   const allLeads = useAppStore(s => s.leads);
   const chats = useAppStore(s => s.chats);
   const conversas = useAppStore(s => s.conversas);
+  const perfis = useAppStore(s => s.perfisRemotos);
+  const tags = useAppStore(s => s.tags);
   const token = useAppStore(s => s.token);
   const enviarMensagem = useAppStore(s => s.enviarMensagem);
   const toast = useAppStore(s => s.toast);
@@ -40,15 +44,23 @@ export default function Conversas() {
   const conversaPorLead = useMemo(() => new Map(conversas.map(c => [c.leadId, c])), [conversas]);
 
   const q = (convQuery || '').trim().toLowerCase();
+  const [convTag, setConvTag] = useState<string | null>(null);
   const convBase = useMemo(() => allLeads
     .filter(l => conversaPorLead.has(l.id))
     .filter(l => (isManager ? (convCorretor === 'Todos os corretores' || l.corretor === convCorretor) : l.corretor === meNome))
+    .filter(l => !convTag || l.tags.includes(convTag))
     .filter(l => !q || l.nome.toLowerCase().includes(q) || (q.replace(/\D/g, '') !== '' && l.tel.replace(/\D/g, '').includes(q.replace(/\D/g, ''))))
     .sort((a, b) => new Date(conversaPorLead.get(b.id)!.enviadoEm).getTime() - new Date(conversaPorLead.get(a.id)!.enviadoEm).getTime()),
-    [allLeads, conversaPorLead, isManager, convCorretor, meNome, q]);
+    [allLeads, conversaPorLead, isManager, convCorretor, meNome, q, convTag]);
 
   const CL = convBase.find(l => l.id === convId);
   const convThread = mapMsgs(CL ? thread(CL) : []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const paraOFim = () => {
+    const el = scrollRef.current;
+    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  };
+  useEffect(paraOFim, [convThread.length, convId, convTyping]);
   const slashQ = (convDraft || '').startsWith('/') ? convDraft.slice(1).toLowerCase() : null;
   const SLASH_ITEMS: [string, string][] = [
     ['/tabela', 'Acabei de te enviar a tabela de valores atualizada. Qualquer dúvida, me chama.'],
@@ -59,26 +71,44 @@ export default function Conversas() {
   const slashItems = SLASH_ITEMS.filter(([cmd]) => slashQ === null || cmd.slice(1).startsWith(slashQ));
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
-        <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>Conversas</h1>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{convBase.length + ' conversas'}</span>
-      </div>
-
-      <div className="conv-grid" style={{ display: 'grid', gridTemplateColumns: '322px 1fr', gap: 14, height: 'calc(100vh - 150px)', minHeight: 460 }}>
-        <div className="conv-col" data-hide={CL ? '1' : '0'} style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-          <div style={{ padding: 14, borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input value={convQuery} onChange={e => setConvQuery(e.target.value)} placeholder="Buscar por nome ou telefone…" style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }} />
+    <div className="conv-fullbleed">
+      <div className="conv-grid">
+        <div className="conv-col" data-hide={CL ? '1' : '0'} style={{ borderRight: '1px solid var(--line)', background: 'var(--card)', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+              <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 21, margin: 0 }}>Conversas</h1>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{convBase.length}</span>
+            </div>
+            <input value={convQuery} onChange={e => setConvQuery(e.target.value)} placeholder="Buscar por nome ou telefone…" style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13, boxSizing: 'border-box' }} />
             {isManager && (
-              <select value={convCorretor} onChange={e => setConvCorretor(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }}>
-                <option>Todos os corretores</option>{CORRETORES.map(c => <option key={c.nome}>{c.nome}</option>)}
+              <select value={convCorretor} onChange={e => setConvCorretor(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13, boxSizing: 'border-box' }}>
+                <option>Todos os corretores</option>
+                {perfis.map(p => <option key={p.id}>{p.nome}</option>)}
               </select>
+            )}
+            {tags.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {tags.map(t => {
+                  const on = convTag === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setConvTag(on ? null : t.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 20, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (on ? t.cor : 'var(--line)'), background: on ? t.cor : 'var(--bg)', color: on ? '#fff' : 'var(--muted)' }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: on ? '#fff' : t.cor, flex: 'none' }} />
+                      {t.nome}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {convBase.map(l => {
               const resumo = conversaPorLead.get(l.id);
-              const legendaAnexo = resumo?.anexoTipo === 'imagem' ? '📷 Foto' : resumo?.anexoTipo === 'video' ? '🎞️ Vídeo' : resumo?.anexoTipo === 'documento' ? '📎 Documento' : resumo?.anexoTipo === 'audio' ? '🎤 Áudio' : resumo?.texto;
+              const legendaAnexo = resumo?.anexoTipo === 'imagem' ? 'Foto' : resumo?.anexoTipo === 'video' ? 'Vídeo' : resumo?.anexoTipo === 'documento' ? 'Documento' : resumo?.anexoTipo === 'audio' ? 'Áudio' : resumo?.texto;
               const dataMsg = resumo ? new Date(resumo.enviadoEm) : null;
               const horaMsg = dataMsg ? dataMsg.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
               const diasMsg = dataMsg ? Math.max(0, Math.floor((Date.now() - dataMsg.getTime()) / 86400000)) : 0;
@@ -89,15 +119,22 @@ export default function Conversas() {
                   onClick={() => pickConv(l.id)}
                   style={{ width: '100%', display: 'flex', gap: 11, alignItems: 'center', padding: '13px 14px', border: 'none', borderBottom: '1px solid var(--line)', background: on ? 'var(--bg)' : 'transparent', boxShadow: 'inset 3px 0 0 ' + (on ? 'var(--terra)' : 'transparent') }}
                 >
-                  <span style={{ width: 38, height: 38, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, background: 'var(--terraSoft)', color: 'var(--terra)' }}>{ini(l.nome)}</span>
+                  <ChatAvatar nome={l.nome} foto={l.foto} size={38} />
                   <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
+                      {(() => {
+                        const minhas = tags.filter(t => l.tags.includes(t.id));
+                        return minhas.slice(0, 3).map(t => <Flag key={t.id} size={12} strokeWidth={0} fill={t.cor} color={t.cor} style={{ flex: 'none' }} />);
+                      })()}
                       <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{diasMsg === 0 ? horaMsg : dayLabel(diasMsg) + ' ' + horaMsg}</span>
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: l.canal === 'WhatsApp' ? 'var(--olive)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terra)' : 'var(--muted)' }} />
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(resumo?.direcao === 'out' ? 'Você: ' : '') + legendaAnexo}</span>
+                      <span style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '1px 5px', borderRadius: 4, color: l.canal === 'WhatsApp' ? 'var(--olive)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terra)' : 'var(--muted)', background: l.canal === 'WhatsApp' ? 'var(--oliveSoft)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terraSoft)' : 'var(--line)' }}>{l.canal}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: (resumo?.naoLidas ?? 0) > 0 ? 'var(--ink)' : 'var(--muted)', fontWeight: (resumo?.naoLidas ?? 0) > 0 ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(resumo?.direcao === 'out' ? 'Você: ' : '') + legendaAnexo}</span>
+                      {(resumo?.naoLidas ?? 0) > 0 && (
+                        <span style={{ flex: 'none', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: 'var(--olive)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{resumo!.naoLidas! > 99 ? '99+' : resumo!.naoLidas}</span>
+                      )}
                     </span>
                   </span>
                 </button>
@@ -112,13 +149,13 @@ export default function Conversas() {
           </div>
         </div>
 
-        <div className="conv-col" data-hide={CL ? '0' : '1'} style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        <div className="conv-col" data-hide={CL ? '0' : '1'} style={{ background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {CL ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--line)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--line)', background: 'var(--card)', flex: 'none' }}>
                 <button className="conv-back" onClick={backToList} style={{ display: 'none', width: 30, height: 30, flex: 'none', border: '1px solid var(--line)', borderRadius: 8, background: 'none', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>‹</button>
                 <button onClick={() => openLead(CL.id, 'chat')} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', textAlign: 'left', padding: 0 }}>
-                  <span style={{ width: 38, height: 38, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, background: 'var(--terraSoft)', color: 'var(--terra)' }}>{ini(CL.nome)}</span>
+                  <ChatAvatar nome={CL.nome} foto={CL.foto} size={38} />
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'block', fontSize: 14.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CL.nome}</span>
                     <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{CL.imovel} · {CL.corretor}</span>
@@ -127,7 +164,7 @@ export default function Conversas() {
                 <span style={css(canalPill(CL.canal))}>{CL.canal}</span>
                 <button onClick={() => openLead(CL.id, 'chat')} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Ver lead</button>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {convThread.map(m => (
                   <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {m.sep && (
@@ -139,10 +176,10 @@ export default function Conversas() {
                     )}
                     <div style={css(m.rowStyle)}>
                       <span style={css(m.bubbleStyle)}>
-                        {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>🤖 Follow-up automático</span>}
-                        {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} />}
+                        {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Follow-up automático</span>}
+                        {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFim} />}
                         {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
-                        <span style={{ display: 'block', fontSize: 10.5, opacity: 0.65, marginTop: 5, textAlign: 'right' }}>{m.stamp}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
                       </span>
                     </div>
                   </div>
@@ -155,8 +192,9 @@ export default function Conversas() {
                     <span style={{ fontSize: 11.5, color: 'var(--muted)', marginLeft: 6 }}>{CL.nome.split(' ')[0]} está digitando…</span>
                   </div>
                 )}
+                
               </div>
-              <div style={{ borderTop: '1px solid var(--line)', padding: '14px 18px', position: 'relative' }}>
+              <div style={{ borderTop: '1px solid var(--line)', padding: '14px 18px', position: 'relative', background: 'var(--card)', flex: 'none' }}>
                 {slashQ !== null && slashItems.length > 0 && (
                   <div style={{ position: 'absolute', left: 18, right: 18, bottom: 64, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,27,26,.14)' }}>
                     <p style={{ fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '6px 10px 8px' }}>Templates rápidos</p>
@@ -180,8 +218,8 @@ export default function Conversas() {
                       if (!file || !token || !CL) return;
                       setEnviandoAnexo(true);
                       try {
-                        const { url } = await uploadArquivo(file, token);
-                        await enviarMensagem(CL.id, { anexoUrl: url, anexoTipo: tipoDeArquivo(file.type) });
+                        const { url, nome } = await uploadArquivo(file, token);
+                        await enviarMensagem(CL.id, { anexoUrl: url, anexoTipo: tipoDeArquivo(file.type), anexoNome: nome });
                       } catch (err) {
                         toast((err as Error).message || 'Não foi possível enviar o anexo');
                       } finally {
@@ -201,7 +239,7 @@ export default function Conversas() {
                       setEnviandoAnexo(true);
                       try {
                         const { url } = await uploadArquivo(file, token);
-                        await enviarMensagem(CL.id, { anexoUrl: url, anexoTipo: 'audio' });
+                        await enviarMensagem(CL.id, { anexoUrl: url, anexoTipo: "audio" });
                       } catch (err) {
                         toast((err as Error).message || 'Não foi possível enviar o áudio');
                       } finally {

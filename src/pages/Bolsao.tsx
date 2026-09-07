@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { ROLETA_LOG } from '../lib/data';
-import { canalPill, thumb, PILL } from '../lib/format';
+import { canalPill, PILL } from '../lib/format';
 import { css } from '../lib/css';
+import { ChatAvatar } from '../components/ChatAvatar';
 import type { BolsaoTab } from '../store/appStore';
 
 const MOTIVOS_EXTREMOS = ['Descadastrar', 'Já Comprou'];
@@ -21,10 +21,18 @@ export default function Bolsao() {
   const setBolsaoTab = useAppStore(s => s.setBolsaoTab);
   const bolsaoAssume = useAppStore(s => s.bolsaoAssume);
   const bolsaoDiscard = useAppStore(s => s.bolsaoDiscard);
-  const pull = useAppStore(s => s.pull);
+  const puxarRebatida = useAppStore(s => s.puxarRebatida);
+  const rebatidasStatus = useAppStore(s => s.rebatidasStatus);
+  const fetchRebatidasStatus = useAppStore(s => s.fetchRebatidasStatus);
+  const limiteRebatidasDia = useAppStore(s => s.limiteRebatidasDia);
+  const fetchLimiteRebatidas = useAppStore(s => s.fetchLimiteRebatidas);
+  const salvarLimiteRebatidas = useAppStore(s => s.salvarLimiteRebatidas);
   const openLead = useAppStore(s => s.openLead);
   const toast = useAppStore(s => s.toast);
-  const { isManager, meNome } = useRoleInfo();
+  const { isManager } = useRoleInfo();
+  useEffect(() => { fetchRebatidasStatus(); fetchLimiteRebatidas(); }, [fetchRebatidasStatus, fetchLimiteRebatidas]);
+  const [limiteEdit, setLimiteEdit] = useState('');
+  useEffect(() => { setLimiteEdit(String(limiteRebatidasDia)); }, [limiteRebatidasDia]);
   const [query, setQuery] = useState('');
   const [cidade, setCidade] = useState('Todas as Cidades');
   const [de, setDe] = useState('');
@@ -52,16 +60,54 @@ export default function Bolsao() {
   const leadsNovos = filtrados.filter(l => l.col === 'novo');
   const rebatidasGeral = filtrados.filter(l => l.col === 'rebatida' && !MOTIVOS_EXTREMOS.includes(l.motivo));
   const descadastrar = filtrados.filter(l => l.col === 'rebatida' && MOTIVOS_EXTREMOS.includes(l.motivo));
-  const roletaLog = ROLETA_LOG.filter(r => isManager || r[2] === meNome);
+  const roletaLog = useAppStore(s => s.roletaLog);
+  const fetchRoletaLog = useAppStore(s => s.fetchRoletaLog);
+  useEffect(() => { fetchRoletaLog(); }, [fetchRoletaLog]);
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div className="page-head" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
         <div>
           <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Recuperação</p>
           <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>Bolsão de Leads</h1>
         </div>
-        <button onClick={pull} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Puxar mais rebatidas</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {isManager && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+              Limite por corretor/dia
+              <input
+                type="number" min={0} value={limiteEdit}
+                onChange={e => setLimiteEdit(e.target.value)}
+                onBlur={() => { const v = Math.max(0, parseInt(limiteEdit || '0', 10) || 0); if (v !== limiteRebatidasDia) salvarLimiteRebatidas(v); }}
+                style={{ width: 56, padding: '7px 8px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 11 }}>0 = ilimitado</span>
+            </label>
+          )}
+          {!isManager && rebatidasStatus && (
+            <span style={{ fontSize: 12, color: rebatidasStatus.tarefasAtrasadas > 0 ? 'var(--terra)' : 'var(--muted)' }}>
+              {rebatidasStatus.tarefasAtrasadas > 0
+                ? rebatidasStatus.tarefasAtrasadas + ' tarefa(s) atrasada(s) — resolva pra liberar'
+                : rebatidasStatus.limite > 0
+                  ? 'Você puxou ' + rebatidasStatus.puxadasHoje + ' de ' + rebatidasStatus.limite + ' hoje'
+                  : rebatidasStatus.puxadasHoje + ' puxadas hoje'}
+            </span>
+          )}
+          {(() => {
+            const rs = rebatidasStatus;
+            const bloqueado = !!rs && (rs.tarefasAtrasadas > 0 || (rs.limite > 0 && rs.puxadasHoje >= rs.limite) || rs.disponiveis === 0);
+            return (
+              <button
+                onClick={() => puxarRebatida()}
+                disabled={!isManager && bloqueado}
+                title={rs && rs.disponiveis === 0 ? 'Bolsão vazio' : ''}
+                style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: !isManager && bloqueado ? 0.5 : 1 }}
+              >
+                Puxar rebatida{rs && rs.disponiveis > 0 ? ' (' + rs.disponiveis + ' no bolsão)' : ''}
+              </button>
+            );
+          })()}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -92,9 +138,9 @@ export default function Bolsao() {
 
       {bTab === 'novos' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {leadsNovos.map((l, i) => (
+          {leadsNovos.map(l => (
             <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <span style={css(thumb(i, 34))} />
+              <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
                 <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.imovelSub} · {l.tel}</span>
@@ -110,9 +156,9 @@ export default function Bolsao() {
 
       {bTab === 'rebatidas' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {rebatidasGeral.map((l, i) => (
+          {rebatidasGeral.map(l => (
             <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <span style={css(thumb(i, 34))} />
+              <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
                 <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.imovelSub} · {l.tel}</span>
@@ -135,11 +181,11 @@ export default function Bolsao() {
 
       {bTab === 'descartados' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+          <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
             <span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Motivo</span><span style={{ width: 140 }}>Último corretor</span><span style={{ width: 90 }}>Há</span>
           </div>
           {rebatidasGeral.map(l => (
-            <div key={l.id} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
               <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{l.nome}</span>
               <span style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>{l.motivo}</span>
               <span style={{ width: 140, fontSize: 13 }}>{l.corretor}</span>
@@ -153,7 +199,7 @@ export default function Bolsao() {
       {bTab === 'descadastrar' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
           {descadastrar.map(l => (
-            <div key={l.id} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
                 <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.tel}</span>
@@ -169,17 +215,21 @@ export default function Bolsao() {
 
       {bTab === 'roletalog' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+          <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
             <span style={{ width: 130 }}>Data / hora</span><span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Recebido por</span><span style={{ width: 170 }}>Origem</span>
           </div>
-          {roletaLog.map((r, i) => (
-            <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <span style={{ width: 130, fontSize: 12.5, color: 'var(--muted)' }}>{r[0]}</span>
-              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{r[1]}</span>
-              <span style={{ flex: 1, fontSize: 13 }}>{r[2]}</span>
-              <span style={{ width: 170 }}><span style={css(PILL + (r[3] === 'Roleta automática' ? 'background:var(--oliveSoft);color:var(--olive)' : 'background:var(--terraSoft);color:var(--terra)'))}>{r[3]}</span></span>
-            </div>
-          ))}
+          {roletaLog.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhuma distribuição registrada ainda.</p></div>}
+          {roletaLog.map((r, i) => {
+            const dt = new Date(r.criadoEm);
+            return (
+              <div key={i} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
+                <span style={{ width: 130, fontSize: 12.5, color: 'var(--muted)' }}>{dt.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} · {dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{r.leadNome}</span>
+                <span style={{ flex: 1, fontSize: 13 }}>{r.corretorNome}</span>
+                <span style={{ width: 170 }}><span style={css(PILL + 'background:var(--oliveSoft);color:var(--olive)')}>{r.origem === 'roleta' ? 'Roleta automática' : r.origem}</span></span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

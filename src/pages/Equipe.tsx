@@ -42,12 +42,12 @@ export default function Equipe() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div className="page-head" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
         <div>
           <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Pessoas</p>
           <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>Equipe</h1>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div className="page-toolbar" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 4 }}>
             {toggleBtn('cards', LayoutGrid, 'Cards')}
             {toggleBtn('lista', ListIcon, 'Lista')}
@@ -107,14 +107,14 @@ export default function Equipe() {
         </div>
       ) : (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+          <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
             <span style={{ flex: 1.6 }}>Nome</span><span style={{ flex: 1 }}>Cargo</span><span style={{ width: 70, textAlign: 'right' }}>Leads</span><span style={{ width: 100 }}>Status</span><span style={{ width: 260 }}>Ações</span>
           </div>
           {perfis.map(p => {
             const isCorretorRow = p.role === 'corretor';
             const canAct = isDono || isCorretorRow;
             return (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 20px', borderBottom: '1px solid var(--line)' }}>
+              <div key={p.id} className="data-row" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 20px', borderBottom: '1px solid var(--line)' }}>
                 <span style={{ flex: 1.6, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                   <span style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--terraSoft)', color: 'var(--terra)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flex: 'none' }}>{ini(p.nome)}</span>
                   <span style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</span>
@@ -126,7 +126,7 @@ export default function Equipe() {
                     ? <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#fff', background: '#A3341F', padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap' }}>Bloqueado</span>
                     : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--olive)', background: 'var(--oliveSoft)', padding: '3px 8px', borderRadius: 20 }}>Ativo</span>}
                 </span>
-                <span style={{ width: 260, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className="row-actions" style={{ width: 260, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {canAct ? (
                     <>
                       <button onClick={() => setEditing(p)} style={{ padding: '6px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'none', fontSize: 11.5, fontWeight: 600 }}>Editar</button>
@@ -147,28 +147,48 @@ export default function Equipe() {
   );
 }
 
+function RoletaPicker({ ids, onChange }: { ids: string[]; onChange: (v: string[]) => void }) {
+  const roletas = useAppStore(s => s.roletas);
+  if (!roletas.length) return null;
+  return (
+    <>
+      <label style={fieldLabel}>Participa das roletas</label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+        {roletas.map(r => (
+          <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <input type="checkbox" checked={ids.includes(r.id)} onChange={e => onChange(e.target.checked ? [...ids, r.id] : ids.filter(x => x !== r.id))} />
+            {r.nome}{r.padrao ? ' (padrão)' : ''}
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function InviteModal({ isDono, onClose, onSubmit }: {
   isDono: boolean;
   onClose: () => void;
-  onSubmit: (input: { nome: string; email: string; telefone?: string; role: 'gerente' | 'corretor' }) => Promise<boolean>;
+  onSubmit: (input: { nome: string; email: string; telefone?: string; role: 'gerente' | 'corretor'; roletaIds?: string[] }) => Promise<boolean>;
 }) {
+  const roletasStore = useAppStore(s => s.roletas);
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
   const [role, setRole] = useState<'gerente' | 'corretor'>('corretor');
+  const [roletaIds, setRoletaIds] = useState<string[]>(() => roletasStore.filter(r => r.padrao).map(r => r.id));
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!nome.trim() || !email.trim()) return;
     setSaving(true);
-    const ok = await onSubmit({ nome: nome.trim(), email: email.trim(), telefone: telefone.trim() || undefined, role });
+    const ok = await onSubmit({ nome: nome.trim(), email: email.trim(), telefone: telefone.trim() || undefined, role, ...(role === 'corretor' ? { roletaIds } : {}) });
     setSaving(false);
     if (ok) onClose();
   };
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(28,27,26,.45)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 26, animation: 'fadeUp .14s ease' }}>
+    <div onClick={onClose} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>
+      <div onClick={e => e.stopPropagation()} className="modal-card" style={{ width: '100%', maxWidth: 420, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 26, animation: 'fadeUp .14s ease' }}>
         <h3 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 22, margin: '0 0 18px' }}>Convidar membro</h3>
         <label style={fieldLabel}>Nome</label>
         <input value={nome} onChange={e => setNome(e.target.value)} style={fieldInput} placeholder="Nome completo" />
@@ -181,6 +201,7 @@ function InviteModal({ isDono, onClose, onSubmit }: {
           <option value="corretor">Corretor</option>
           {isDono && <option value="gerente">Gerente</option>}
         </select>
+        {role === 'corretor' && <RoletaPicker ids={roletaIds} onChange={setRoletaIds} />}
         <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 20px' }}>Senha padrão de acesso: 123456 (o membro pode trocar depois).</p>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600 }}>Cancelar</button>
@@ -194,28 +215,30 @@ function InviteModal({ isDono, onClose, onSubmit }: {
 function EditModal({ perfil, onClose, onSubmit }: {
   perfil: RemotePerfil;
   onClose: () => void;
-  onSubmit: (id: string, patch: { nome: string; telefone: string }) => Promise<boolean>;
+  onSubmit: (id: string, patch: { nome?: string; telefone?: string; roletaIds?: string[] }) => Promise<boolean>;
 }) {
   const [nome, setNome] = useState(perfil.nome);
   const [telefone, setTelefone] = useState(perfil.telefone ?? '');
+  const [roletaIds, setRoletaIds] = useState<string[]>(perfil.roletaIds ?? []);
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!nome.trim()) return;
     setSaving(true);
-    const ok = await onSubmit(perfil.id, { nome: nome.trim(), telefone: telefone.trim() });
+    const ok = await onSubmit(perfil.id, { nome: nome.trim(), telefone: telefone.trim(), ...(perfil.role === 'corretor' ? { roletaIds } : {}) });
     setSaving(false);
     if (ok) onClose();
   };
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(28,27,26,.45)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 26, animation: 'fadeUp .14s ease' }}>
+    <div onClick={onClose} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>
+      <div onClick={e => e.stopPropagation()} className="modal-card" style={{ width: '100%', maxWidth: 420, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 26, animation: 'fadeUp .14s ease' }}>
         <h3 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 22, margin: '0 0 18px' }}>Editar {perfil.nome}</h3>
         <label style={fieldLabel}>Nome</label>
         <input value={nome} onChange={e => setNome(e.target.value)} style={fieldInput} />
         <label style={fieldLabel}>Telefone</label>
-        <input value={telefone} onChange={e => setTelefone(e.target.value)} style={{ ...fieldInput, marginBottom: 20 }} placeholder="(11) 90000-0000" />
+        <input value={telefone} onChange={e => setTelefone(e.target.value)} style={{ ...fieldInput, marginBottom: 16 }} placeholder="(11) 90000-0000" />
+        {perfil.role === 'corretor' && <RoletaPicker ids={roletaIds} onChange={setRoletaIds} />}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600 }}>Cancelar</button>
           <button onClick={submit} disabled={saving} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: saving ? 0.6 : 1 }}>{saving ? 'Salvando…' : 'Salvar'}</button>

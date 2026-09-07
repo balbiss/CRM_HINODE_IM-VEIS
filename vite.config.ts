@@ -4,11 +4,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: { port: 5173, strictPort: true },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-192.png', 'icon-512.png'],
+      includeAssets: ['icon-192.png', 'icon-512.png', 'push-sw.js'],
       manifest: {
         name: 'Hinode Imóveis — CRM',
         short_name: 'Hinode',
@@ -28,6 +29,7 @@ export default defineConfig({
       workbox: {
         navigateFallback: '/index.html',
         globPatterns: ['**/*.{js,css,html,png,svg}'],
+        importScripts: ['/push-sw.js'],
       },
       devOptions: {
         enabled: true,

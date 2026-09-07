@@ -4,8 +4,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { AppShell } from './components/AppShell';
 import { RequireAuth } from './components/RequireAuth';
+import { RequirePlataforma } from './components/RequirePlataforma';
 import { useAppStore } from './store/appStore';
+import { usePlataformaStore } from './store/plataformaStore';
 import Login from './pages/Login';
+import PlataformaLogin from './pages/plataforma/PlataformaLogin';
+import PlataformaShell from './pages/plataforma/PlataformaShell';
+import PlataformaResumo from './pages/plataforma/PlataformaResumo';
+import PlataformaImobiliarias from './pages/plataforma/PlataformaImobiliarias';
 import Dashboard from './pages/Dashboard';
 import Kanban from './pages/Kanban';
 import Conversas from './pages/Conversas';
@@ -20,19 +26,30 @@ import Equipe from './pages/Equipe';
 import Relatorios from './pages/Relatorios';
 import Manual from './pages/Manual';
 import Integracoes from './pages/Integracoes';
+import SiteImoveis from './pages/SiteImoveis';
 import Templates from './pages/Templates';
 import LinksUteis from './pages/LinksUteis';
 import Treinamentos from './pages/Treinamentos';
 import Configuracoes from './pages/Configuracoes';
 import Denied from './pages/Denied';
+import SitePublico from './pages/site/SitePublico';
 
 useAppStore.getState().hydrateAuth();
+usePlataformaStore.getState().hydrate();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/s/:slug" element={<SitePublico />} />
+        <Route path="/plataforma/login" element={<PlataformaLogin />} />
+        <Route element={<RequirePlataforma />}>
+          <Route path="/plataforma" element={<PlataformaShell />}>
+            <Route index element={<PlataformaResumo />} />
+            <Route path="imobiliarias" element={<PlataformaImobiliarias />} />
+          </Route>
+        </Route>
         <Route element={<RequireAuth />}>
         <Route path="/" element={<AppShell />}>
           <Route index element={<Navigate to="/dash" replace />} />
@@ -48,6 +65,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="followup" element={<Followup />} />
           <Route path="templates" element={<Templates />} />
           <Route path="integracoes" element={<Integracoes />} />
+          <Route path="site" element={<SiteImoveis />} />
           <Route path="links-uteis" element={<LinksUteis />} />
           <Route path="treinamentos" element={<Treinamentos />} />
           <Route path="equipe" element={<Equipe />} />

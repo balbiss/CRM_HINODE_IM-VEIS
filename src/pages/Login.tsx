@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import Logo from '../components/Logo';
 
 const fadeUp = (delayMs: number): React.CSSProperties => ({
   opacity: 0,
@@ -14,9 +15,13 @@ export default function Login() {
   const login = useAppStore(s => s.login);
   const authLoading = useAppStore(s => s.authLoading);
   const authError = useAppStore(s => s.authError);
-  const [email, setEmail] = useState('camila.rocha@novaimob.com.br');
+  const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showSenha, setShowSenha] = useState(false);
+  const [recOpen, setRecOpen] = useState(false);
+  const [recEmail, setRecEmail] = useState('');
+  const [recBusy, setRecBusy] = useState(false);
+  const [recFeito, setRecFeito] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,33 +29,46 @@ export default function Login() {
     if (ok) nav('/dash');
   };
 
-  const contasTeste = [
-    { label: 'Dono', email: 'hinodeimoveis.crm@gmail.com', senha: '280896Ab@' },
-    { label: 'Gerente', email: 'camila.rocha@novaimob.com.br', senha: '123456' },
-    { label: 'Corretor', email: 'diego.antunes@novaimob.com.br', senha: '123456' },
-  ];
-  const quickLogin = async (e: string, s: string) => {
-    setEmail(e);
-    setSenha(s);
-    const ok = await login(e, s);
-    if (ok) nav('/dash');
+  const abrirRecuperar = () => {
+    setRecEmail(email);
+    setRecFeito(false);
+    setRecOpen(true);
+  };
+
+  const enviarRecuperar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecBusy(true);
+    try {
+      await fetch((import.meta.env.VITE_API_URL || '') + '/api/auth/esqueci-senha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recEmail }),
+      });
+    } catch { /* resposta é sempre genérica, não expõe erro */ }
+    setRecBusy(false);
+    setRecFeito(true);
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '1.05fr 1fr' }}>
-      <div style={{ background: 'var(--side)', color: 'var(--sideInk)', padding: '56px 52px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100vh', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, ...fadeUp(0) }}>
-          <div style={{ width: 14, height: 14, background: 'var(--terra)', transform: 'rotate(45deg)', animation: 'pulse 2.6s ease-in-out infinite' }} />
-          <span style={{ fontFamily: 'Newsreader,serif', fontSize: 24, letterSpacing: '.18em', textTransform: 'uppercase' }}>Hinode Imóveis</span>
+    <div className="login-grid" style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '1.05fr 1fr' }}>
+      <div className="login-hero" style={{ background: 'var(--side)', color: 'var(--sideInk)', padding: '56px 52px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100vh', overflow: 'hidden' }}>
+        <div style={{ ...fadeUp(0) }}>
+          <Logo markSize={58} wordSize={22} />
         </div>
         <div style={{ maxWidth: 460 }}>
-          <p style={{ fontFamily: 'Newsreader,serif', fontSize: 46, lineHeight: 1.1, margin: '0 0 20px', fontWeight: 400, ...fadeUp(120) }}>Nenhum lead esquecido. Nenhum corretor sobrecarregado.</p>
-          <p style={{ color: 'var(--sideMuted)', fontSize: 15, lineHeight: 1.7, margin: 0, ...fadeUp(260) }}>Sistema interno da Hinode Imóveis: do primeiro "oi" no WhatsApp até a venda fechada, com roleta de atendimento, follow-up automático e análise de crédito no mesmo fluxo.</p>
+          <p style={{ fontFamily: 'Newsreader,serif', fontSize: 46, lineHeight: 1.12, margin: '0 0 18px', fontWeight: 400, ...fadeUp(120) }}>Do primeiro contato ao negócio fechado.</p>
+          <p style={{ color: 'var(--sideInk)', fontSize: 16, lineHeight: 1.6, margin: '0 0 16px', ...fadeUp(220) }}>Tenha controle total dos seus leads, visitas, atendimentos e vendas em uma única plataforma.</p>
+          <p style={{ color: 'var(--sideMuted)', fontSize: 15, lineHeight: 1.7, margin: 0, ...fadeUp(300) }}>O CRM da sua imobiliária: do primeiro "oi" no WhatsApp até a venda fechada, com roleta de atendimento, follow-up automático e análise de crédito no mesmo fluxo.</p>
         </div>
-        <p style={{ color: 'var(--sideMuted)', fontSize: 12, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0, ...fadeUp(380) }}>Hinode Imóveis</p>
+        <div style={{ opacity: 0.55, ...fadeUp(380) }}>
+          <Logo markSize={18} wordSize={10} showCrm={false} gap={8} />
+        </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 32px' }}>
+      <div className="login-form-col" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 32px', minHeight: '100vh' }}>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 352, ...fadeUp(180) }}>
+          <div className="login-mobile-logo" style={{ display: 'none', marginBottom: 30 }}>
+            <Logo markSize={40} wordSize={18} />
+          </div>
           <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 34, margin: '0 0 6px' }}>Acessar a plataforma</h1>
           <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 32px' }}>Bem-vindo de volta.</p>
           <label style={{ display: 'block', fontSize: 12, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>E-mail</label>
@@ -89,24 +107,78 @@ export default function Login() {
             {authLoading ? 'Entrando…' : 'Entrar'}
           </button>
 
-          <div style={{ marginTop: 26, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
-            <p style={{ fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 10px' }}>Contas de teste</p>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {contasTeste.map(c => (
-                <button
-                  key={c.label}
-                  type="button"
-                  onClick={() => quickLogin(c.email, c.senha)}
-                  title={c.email + ' · ' + c.senha}
-                  style={{ flex: 1, padding: '8px 6px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={abrirRecuperar}
+            style={{ display: 'block', margin: '18px auto 0', border: 'none', background: 'none', color: 'var(--muted)', fontSize: 13, textDecoration: 'underline', textUnderlineOffset: 3 }}
+          >
+            Esqueci minha senha
+          </button>
         </form>
       </div>
+
+      {recOpen && (
+        <div
+          className="modal-overlay"
+          onClick={() => setRecOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,26,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}
+        >
+          <div
+            className="modal-card"
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 400, background: 'var(--card)', borderRadius: 14, padding: 28, boxShadow: '0 20px 60px rgba(10,15,26,.25)' }}
+          >
+            {recFeito ? (
+              <>
+                <h2 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: '0 0 10px' }}>Solicitação enviada</h2>
+                <p style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.6, margin: '0 0 22px' }}>
+                  Se esse e-mail estiver cadastrado, o gerente ou o dono da sua imobiliária recebe a solicitação
+                  no painel e vai te passar uma senha nova. Se você é o dono, fale com o suporte técnico.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRecOpen(false)}
+                  style={{ width: '100%', padding: 12, background: 'var(--terra)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}
+                >
+                  Entendi
+                </button>
+              </>
+            ) : (
+              <form onSubmit={enviarRecuperar}>
+                <h2 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: '0 0 8px' }}>Recuperar acesso</h2>
+                <p style={{ color: 'var(--muted)', fontSize: 13.5, lineHeight: 1.6, margin: '0 0 18px' }}>
+                  Informe o e-mail da sua conta. A solicitação vai para o gerente/dono da sua imobiliária.
+                </p>
+                <input
+                  value={recEmail}
+                  onChange={e => setRecEmail(e.target.value)}
+                  type="email"
+                  required
+                  autoFocus
+                  placeholder="voce@imobiliaria.com.br"
+                  style={{ width: '100%', padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 14, marginBottom: 18 }}
+                />
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setRecOpen(false)}
+                    style={{ flex: 1, padding: 12, background: 'var(--bg)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, fontWeight: 600 }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={recBusy}
+                    style={{ flex: 1, padding: 12, background: 'var(--terra)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, opacity: recBusy ? 0.7 : 1 }}
+                  >
+                    {recBusy ? 'Enviando…' : 'Enviar'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

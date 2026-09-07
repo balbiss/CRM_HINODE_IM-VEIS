@@ -1,6 +1,8 @@
 import { dayLabel, stamp, stripAccents } from './format';
 
 export type Role = 'Dono' | 'Gerente' | 'Corretor';
+/** Slugs das colunas "de sistema" — outras telas (Dashboard, Crédito, Bolsão, roleta) dependem
+ *  desses nomes fixos. Colunas criadas pelo usuário não têm slug. */
 export type ColId = 'novo' | 'atend' | 'credito' | 'visita' | 'proposta' | 'venda' | 'rebatida';
 
 export interface Col {
@@ -9,6 +11,8 @@ export interface Col {
   color: string;
 }
 
+/** Catálogo das colunas de sistema (título e cor padrão). O Kanban de verdade é montado a
+ *  partir das colunas do banco (colunasRemotas); isto aqui é só referência/seed. */
 export const COLS: Col[] = [
   { id: 'novo', title: 'Lead Novo', color: 'var(--muted)' },
   { id: 'atend', title: 'Em Atendimento', color: 'var(--terra)' },
@@ -68,18 +72,24 @@ export interface Lead {
   nome: string;
   tel: string;
   email: string;
+  foto: string;
+  colunaId: string;
+  imovelInteresseId: string;
   imovel: string;
   imovelSub: string;
   valor: number;
   canal: string;
-  col: ColId;
+  /** slug da coluna de sistema, OU o id da coluna quando for uma coluna customizada sem slug */
+  col: string;
   dias: number;
   segundo: boolean;
+  cadencia: string;
   corretor: string;
   campanha: string;
   motivo: string;
   renda: number;
   entrouNaColunaEm?: string;
+  tags: string[];
 }
 
 export function buildLeads(): Lead[] {
@@ -97,13 +107,15 @@ export function buildLeads(): Lead[] {
     return {
       id: 'L' + (100 + i),
       nome,
+      foto: '',
       tel: '(11) 9' + (8000 + i * 37) + '-' + (1000 + i * 13),
       email: stripAccents(nome.toLowerCase()).replace(/ /g, '.') + '@email.com',
-      imovel: im[0], imovelSub: im[1], valor: im[2],
-      canal: CANAIS[i % CANAIS.length], col: dist[i], dias: (i * 3) % 11,
-      segundo: i % 7 === 0, corretor: CORRETORES[i % CORRETORES.length].nome,
+      imovelInteresseId: '', imovel: im[0], imovelSub: im[1], valor: im[2],
+      canal: CANAIS[i % CANAIS.length], col: dist[i], colunaId: dist[i], dias: (i * 3) % 11,
+      segundo: i % 7 === 0, cadencia: '', corretor: CORRETORES[i % CORRETORES.length].nome,
       campanha: i % 2 ? 'Aurora — Lançamento' : 'Vila Serena — Fase 2',
       motivo: MOTIVOS[i % MOTIVOS.length], renda: 9000 + (i % 6) * 4200,
+      tags: [],
     };
   });
 }
@@ -119,11 +131,16 @@ export interface ChatMsg {
   off?: number;
   anexoUrl?: string | null;
   anexoTipo?: AnexoTipo | null;
+  anexoNome?: string | null;
+  /** "visto" do WhatsApp: 1 enviando, 2 servidor, 3 entregue, 4 lido, 5 reproduzido. */
+  ack?: number;
 }
 
 export interface MappedMsg {
   id: string; texto: string; hora: string; stamp: string; sep: boolean; sepLabel: string; bot: boolean;
-  rowStyle: string; bubbleStyle: string; anexoUrl?: string | null; anexoTipo?: AnexoTipo | null;
+  rowStyle: string; bubbleStyle: string; anexoUrl?: string | null; anexoTipo?: AnexoTipo | null; anexoNome?: string | null;
+  /** "visto" só nas mensagens enviadas: '' | '✓' (enviada) | '✓✓' (entregue) | '✓✓ azul' (lida). */
+  visto: '' | 'enviado' | 'entregue' | 'lido';
 }
 
 export function mapMsgs(arr: ChatMsg[]): MappedMsg[] {
@@ -133,9 +150,11 @@ export function mapMsgs(arr: ChatMsg[]): MappedMsg[] {
     const lab = dayLabel(off);
     const sep = lab !== prev;
     prev = lab;
+    const visto: MappedMsg['visto'] = m.side !== 'out' ? ''
+      : (m.ack ?? 0) >= 4 ? 'lido' : (m.ack ?? 0) === 3 ? 'entregue' : 'enviado';
     return {
       id: m.id, texto: m.texto, hora: m.hora, stamp: stamp(off, m.hora), sep, sepLabel: lab, bot: !!m.bot,
-      anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo,
+      anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo, anexoNome: m.anexoNome, visto,
       rowStyle: 'display:flex;justify-content:' + (m.side === 'out' ? 'flex-end' : 'flex-start'),
       bubbleStyle: 'max-width:72%;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;' +
         (m.bot ? 'background:#4B3B7A;color:#fff' : m.side === 'out' ? 'background:var(--terra);color:#fff' : 'background:var(--bg);border:1px solid var(--line)'),
