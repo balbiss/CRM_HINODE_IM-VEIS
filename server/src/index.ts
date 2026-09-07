@@ -26,6 +26,7 @@ import { tarefasRouter } from './routes/tarefas.js';
 import { followupRouter } from './routes/followup.js';
 import { sitesRouter } from './routes/sites.js';
 import { roletasRouter } from './routes/roletas.js';
+import { relatoriosRouter } from './routes/relatorios.js';
 import { verifyToken } from './lib/jwt.js';
 import { ensureBucket } from './lib/storage.js';
 import { bootstrapAdminPlataforma, varrerInadimplencia } from './lib/bootstrapPlataforma.js';
@@ -53,6 +54,7 @@ app.use('/api/notificacoes', notificacoesRouter);
 app.use('/api/integracoes', integracoesRouter);
 app.use('/api/plataforma', plataformaRouter);
 app.use('/api/push', pushRouter);
+app.use('/api/relatorios', relatoriosRouter);
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:5173' } });
