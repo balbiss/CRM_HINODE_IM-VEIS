@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp } from '../db/schema.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { wahaConfigurado, criarSessao, pararSessao, statusSessao, qrSessao, webhookSecret, fotoPerfil, baixarMidiaMensagem } from '../lib/waha.js';
 import { uploadFile } from '../lib/storage.js';
 import { distribuirLead } from '../lib/roleta.js';
@@ -262,7 +262,32 @@ export function whatsappRouter(io: SocketServer) {
     res.json({ wahaConfigurado: wahaConfigurado(), conectadas: rows.filter(r => r.status === 'conectada').length, total: rows.length });
   });
 
-  router.use(requireRole('dono', 'gerente'));
+  // Dono/Gerente mexem em qualquer sessão. Corretor só mexe no PRÓPRIO número,
+  // e apenas quando a imobiliária está no modo "WhatsApp de cada corretor".
+  const gestaoSessoes: import('express').RequestHandler = async (req, res, next) => {
+    const { role, imobiliariaId, sub } = req.auth!;
+    if (role === 'dono' || role === 'gerente') return next();
+    const [imob] = await db.select({ modo: imobiliarias.modoWhatsapp }).from(imobiliarias)
+      .where(eq(imobiliarias.id, imobiliariaId)).limit(1);
+    if ((imob?.modo ?? 'corretor') !== 'corretor') {
+      return res.status(403).json({ error: 'A imobiliária não usa número por corretor.' });
+    }
+    // Rotas com :id checam a posse da sessão no próprio handler (router.use não
+    // enxerga req.params). Aqui só tratamos o POST /sessoes.
+    if (req.method === 'POST') {
+      if (req.body?.id) {
+        const [s] = await db.select().from(sessoesWhatsapp)
+          .where(and(eq(sessoesWhatsapp.id, req.body.id), eq(sessoesWhatsapp.imobiliariaId, imobiliariaId))).limit(1);
+        if (!s || s.escopo !== 'corretor' || s.corretorId !== sub) {
+          return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
+        }
+      } else {
+        req.body = { ...req.body, escopo: 'corretor', corretorId: sub };
+      }
+    }
+    next();
+  };
+  router.use(gestaoSessoes);
 
   async function refrescar(sessionName: string, id: string) {
     if (!wahaConfigurado()) return;
@@ -271,10 +296,14 @@ export function whatsappRouter(io: SocketServer) {
   }
 
   router.get('/sessoes', async (req, res) => {
-    const rows = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId));
+    const ehCorretor = req.auth!.role === 'corretor';
+    const escopoSessoes = ehCorretor
+      ? and(eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId), eq(sessoesWhatsapp.corretorId, req.auth!.sub))
+      : eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId);
+    const rows = await db.select().from(sessoesWhatsapp).where(escopoSessoes);
     // atualiza status de cada uma no WAHA (em paralelo)
     await Promise.all(rows.map(r => refrescar(r.sessionName, r.id).catch(() => {})));
-    const atualizados = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId));
+    const atualizados = await db.select().from(sessoesWhatsapp).where(escopoSessoes);
     res.json({ wahaConfigurado: wahaConfigurado(), sessoes: atualizados });
   });
 
@@ -332,13 +361,21 @@ export function whatsappRouter(io: SocketServer) {
     res.status(201).json(row);
   });
 
+  // Corretor só toca na própria sessão (o middleware de :id não enxerga req.params
+  // em router.use, então a checagem de dono fica aqui em cada rota).
+  const donoDaSessao = (req: import('express').Request, row: { escopo: string; corretorId: string | null }) =>
+    req.auth!.role !== 'corretor' || (row.escopo === 'corretor' && row.corretorId === req.auth!.sub);
+
   // Renomear o rótulo de uma sessão.
   router.patch('/sessoes/:id', async (req, res) => {
     const parsed = z.object({ rotulo: z.string().max(40) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Rótulo inválido' });
+    const [alvo] = await db.select().from(sessoesWhatsapp)
+      .where(and(eq(sessoesWhatsapp.id, req.params.id), eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId))).limit(1);
+    if (!alvo) return res.status(404).json({ error: 'Sessão não encontrada' });
+    if (!donoDaSessao(req, alvo)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
     const [row] = await db.update(sessoesWhatsapp).set({ rotulo: parsed.data.rotulo })
-      .where(and(eq(sessoesWhatsapp.id, req.params.id), eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId))).returning();
-    if (!row) return res.status(404).json({ error: 'Sessão não encontrada' });
+      .where(eq(sessoesWhatsapp.id, alvo.id)).returning();
     res.json(row);
   });
 
@@ -346,6 +383,7 @@ export function whatsappRouter(io: SocketServer) {
     const [row] = await db.select().from(sessoesWhatsapp)
       .where(and(eq(sessoesWhatsapp.id, req.params.id), eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId))).limit(1);
     if (!row) return res.status(404).json({ error: 'Sessão não encontrada' });
+    if (!donoDaSessao(req, row)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
     await refrescar(row.sessionName, row.id).catch(() => {});
     const [atual] = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, row.id)).limit(1);
     const qr = atual.status === 'conectada' ? null : await qrSessao(row.sessionName).catch(() => null);
@@ -356,6 +394,7 @@ export function whatsappRouter(io: SocketServer) {
     const [row] = await db.select().from(sessoesWhatsapp)
       .where(and(eq(sessoesWhatsapp.id, req.params.id), eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId))).limit(1);
     if (!row) return res.status(404).json({ error: 'Sessão não encontrada' });
+    if (!donoDaSessao(req, row)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
     await pararSessao(row.sessionName).catch(() => {});
     await db.delete(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, row.id));
     res.json({ ok: true });
