@@ -51,6 +51,11 @@ export default function Kanban() {
   const [nomeNova, setNomeNova] = useState('');
   const [editandoCol, setEditandoCol] = useState<string | null>(null);
   const [menuCol, setMenuCol] = useState<string | null>(null);
+  // Colunas como "Rebatida" chegam a ter milhares de leads reais — renderizar tudo de uma vez
+  // travava a troca de tela inteira (React montando/desmontando milhares de cards no DOM).
+  const [visivelPorColuna, setVisivelPorColuna] = useState<Record<string, number>>({});
+  const LOTE_COLUNA = 60;
+  const [visivelLista, setVisivelLista] = useState(100);
   const [visoes, setVisoes] = useState<VisaoSalva[]>(() => lerVisoes());
 
   const canais = useMemo(() => [...new Set(allLeads.map(l => l.canal).filter(Boolean))].sort(), [allLeads]);
@@ -240,7 +245,7 @@ export default function Kanban() {
             <span style={{ width: 180 }}>Coluna</span>
             <span style={{ width: 90 }}>Tempo</span>
           </div>
-          {leads.map((l, i) => (
+          {leads.slice(0, visivelLista).map((l, i) => (
             <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
               <button onClick={() => openLead(l.id)} style={{ flex: 1.6, minWidth: 0, display: 'flex', gap: 11, alignItems: 'center', background: 'none', border: 'none', textAlign: 'left', padding: 0 }}>
                 <LeadAvatar foto={l.foto} seedIndex={i} size={32} />
@@ -263,6 +268,16 @@ export default function Kanban() {
               <span style={{ width: 90, fontSize: 11, color: 'var(--muted)' }}>{l.dias === 0 ? 'hoje' : l.dias + 'd'}</span>
             </div>
           ))}
+          {leads.length > visivelLista && (
+            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
+              <button
+                onClick={() => setVisivelLista(v => v + 100)}
+                style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}
+              >
+                Carregar mais ({leads.length - visivelLista} restantes)
+              </button>
+            </div>
+          )}
           {leads.length === 0 && (
             <div style={{ padding: '44px 20px', textAlign: 'center' }}>
               <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead encontrado.</p>
@@ -285,7 +300,9 @@ export default function Kanban() {
 
           <div className="kb-cols" style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 14, alignItems: 'flex-start' }}>
             {colunas.map((c, ci) => {
-              const colLeads = leads.filter(l => l.colunaId === c.id);
+              const colLeadsTotal = leads.filter(l => l.colunaId === c.id);
+              const visivel = visivelPorColuna[c.id] || LOTE_COLUNA;
+              const colLeads = colLeadsTotal.slice(0, visivel);
               const isMobileActive = mobileCol === c.id;
               return (
                 <div
@@ -359,6 +376,14 @@ export default function Kanban() {
                         <CardTagBar lead={l} />
                       </div>
                     ))}
+                    {colLeadsTotal.length > colLeads.length && (
+                      <button
+                        onClick={() => setVisivelPorColuna(v => ({ ...v, [c.id]: (v[c.id] || LOTE_COLUNA) + LOTE_COLUNA }))}
+                        style={{ padding: '9px', border: '1px dashed var(--line)', borderRadius: 10, background: 'none', color: 'var(--muted)', fontSize: 12 }}
+                      >
+                        Carregar mais ({colLeadsTotal.length - colLeads.length} restantes)
+                      </button>
+                    )}
                     {colLeads.length === 0 && (
                       <div style={{ border: '1px dashed var(--line)', borderRadius: 10, padding: '26px 14px', textAlign: 'center' }}>
                         <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>Nenhum lead nesta coluna ainda.<br />Arraste um card para cá.</p>

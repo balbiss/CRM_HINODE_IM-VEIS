@@ -64,6 +64,14 @@ export default function Bolsao() {
   const fetchRoletaLog = useAppStore(s => s.fetchRoletaLog);
   useEffect(() => { fetchRoletaLog(); }, [fetchRoletaLog]);
 
+  // Listas como "Rebatida" chegam a ter milhares de leads reais — renderizar tudo de uma vez
+  // travava a troca de tela inteira (React montando/desmontando milhares de linhas no DOM).
+  const LOTE = 80;
+  const [visivelNovos, setVisivelNovos] = useState(LOTE);
+  const [visivelRebatidas, setVisivelRebatidas] = useState(LOTE);
+  const [visivelDescartados, setVisivelDescartados] = useState(LOTE);
+  const [visivelDescadastrar, setVisivelDescadastrar] = useState(LOTE);
+
   return (
     <div>
       <div className="page-head" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -138,7 +146,7 @@ export default function Bolsao() {
 
       {bTab === 'novos' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {leadsNovos.map(l => (
+          {leadsNovos.slice(0, visivelNovos).map(l => (
             <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
               <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
               <span style={{ flex: 1, minWidth: 0 }}>
@@ -150,13 +158,20 @@ export default function Bolsao() {
               <button onClick={() => openLead(l.id)} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Abrir</button>
             </div>
           ))}
+          {leadsNovos.length > visivelNovos && (
+            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
+              <button onClick={() => setVisivelNovos(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
+                Carregar mais ({leadsNovos.length - visivelNovos} restantes)
+              </button>
+            </div>
+          )}
           {leadsNovos.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead novo no momento.</p></div>}
         </div>
       )}
 
       {bTab === 'rebatidas' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {rebatidasGeral.map(l => (
+          {rebatidasGeral.slice(0, visivelRebatidas).map(l => (
             <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
               <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
               <span style={{ flex: 1, minWidth: 0 }}>
@@ -169,6 +184,13 @@ export default function Bolsao() {
               <button onClick={() => bolsaoDiscard(l.id, l.nome)} style={{ padding: '7px 11px', border: 'none', borderRadius: 7, background: 'none', fontSize: 12.5, color: 'var(--muted)' }}>Descartar</button>
             </div>
           ))}
+          {rebatidasGeral.length > visivelRebatidas && (
+            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
+              <button onClick={() => setVisivelRebatidas(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
+                Carregar mais ({rebatidasGeral.length - visivelRebatidas} restantes)
+              </button>
+            </div>
+          )}
           {rebatidasGeral.length === 0 && (
             <div style={{ padding: '60px 20px', textAlign: 'center' }}>
               <div style={{ width: 28, height: 28, border: '1.5px solid var(--line)', transform: 'rotate(45deg)', margin: '0 auto 16px' }} />
@@ -184,7 +206,7 @@ export default function Bolsao() {
           <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
             <span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Motivo</span><span style={{ width: 140 }}>Último corretor</span><span style={{ width: 90 }}>Há</span>
           </div>
-          {rebatidasGeral.map(l => (
+          {rebatidasGeral.slice(0, visivelDescartados).map(l => (
             <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
               <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{l.nome}</span>
               <span style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>{l.motivo}</span>
@@ -192,13 +214,20 @@ export default function Bolsao() {
               <span style={{ width: 90, fontSize: 11.5, color: 'var(--muted)' }}>{l.dias === 0 ? 'hoje' : l.dias + 'd'}</span>
             </div>
           ))}
+          {rebatidasGeral.length > visivelDescartados && (
+            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
+              <button onClick={() => setVisivelDescartados(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
+                Carregar mais ({rebatidasGeral.length - visivelDescartados} restantes)
+              </button>
+            </div>
+          )}
           {rebatidasGeral.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead descartado registrado.</p></div>}
         </div>
       )}
 
       {bTab === 'descadastrar' && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {descadastrar.map(l => (
+          {descadastrar.slice(0, visivelDescadastrar).map(l => (
             <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
@@ -209,6 +238,13 @@ export default function Bolsao() {
               <button onClick={() => toast('Descarte de ' + l.nome + ' recusado — volta pro corretor')} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Recusar</button>
             </div>
           ))}
+          {descadastrar.length > visivelDescadastrar && (
+            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
+              <button onClick={() => setVisivelDescadastrar(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
+                Carregar mais ({descadastrar.length - visivelDescadastrar} restantes)
+              </button>
+            </div>
+          )}
           {descadastrar.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhuma solicitação de descadastro pendente.</p></div>}
         </div>
       )}
