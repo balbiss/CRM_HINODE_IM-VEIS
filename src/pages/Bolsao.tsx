@@ -72,12 +72,31 @@ export default function Bolsao() {
   const [visivelDescartados, setVisivelDescartados] = useState(LOTE);
   const [visivelDescadastrar, setVisivelDescadastrar] = useState(LOTE);
 
+  // Quantos leads entraram hoje/ontem (por criadoEm, não pelo status atual — um lead que já foi
+  // atendido e movido de coluna continua contando no dia em que de fato entrou).
+  const entradas = useMemo(() => {
+    const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0);
+    const inicioOntem = new Date(inicioHoje); inicioOntem.setDate(inicioOntem.getDate() - 1);
+    let hoje = 0, ontem = 0;
+    for (const l of allLeads) {
+      if (!l.criadoEm) continue;
+      const d = new Date(l.criadoEm);
+      if (d >= inicioHoje) hoje++;
+      else if (d >= inicioOntem) ontem++;
+    }
+    return { hoje, ontem };
+  }, [allLeads]);
+
   return (
     <div>
       <div className="page-head" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
         <div>
           <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Recuperação</p>
-          <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>Bolsão de Leads</h1>
+          <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: '0 0 8px', lineHeight: 1.2 }}>Bolsão de Leads</h1>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}><b style={{ color: 'var(--ink)', fontSize: 15, fontWeight: 700 }}>{entradas.hoje}</b> entraram hoje</span>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}><b style={{ color: 'var(--ink)', fontSize: 15, fontWeight: 700 }}>{entradas.ontem}</b> entraram ontem</span>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {isManager && (

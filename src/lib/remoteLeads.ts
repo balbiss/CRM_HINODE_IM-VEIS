@@ -62,6 +62,7 @@ export function mapRemoteLead(r: RemoteLead, colunas: RemoteColuna[], perfis: Re
     motivo: r.motivoDescarte ?? '',
     renda: r.rendaDeclarada ? Number(r.rendaDeclarada) : 0,
     entrouNaColunaEm: r.entrouNaColunaEm,
+    criadoEm: r.criadoEm,
     tags: r.tagIds ?? [],
   };
 }

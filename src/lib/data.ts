@@ -89,6 +89,7 @@ export interface Lead {
   motivo: string;
   renda: number;
   entrouNaColunaEm?: string;
+  criadoEm?: string;
   tags: string[];
 }
 
