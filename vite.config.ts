@@ -28,6 +28,9 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
+        // API, socket e arquivos do MinIO ficam no MESMO domínio do app: navegação pra eles (ex.: volta do
+        // login do Facebook em /api/integracoes/facebook/oauth/callback) tem que ir pro servidor, não pro index.html.
+        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io\//, /^\/hinode-imoveis\//],
         globPatterns: ['**/*.{js,css,html,png,svg}'],
         importScripts: ['/push-sw.js'],
       },
