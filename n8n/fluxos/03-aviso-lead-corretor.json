@@ -38,7 +38,7 @@
       "id": "v2",
       "name": "Preparar Mensagem",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         224,
         0

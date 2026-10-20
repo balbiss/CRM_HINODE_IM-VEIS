@@ -86,7 +86,7 @@
       "id": "a4",
       "name": "OpenAI (Chave da Imobiliária)",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "typeVersion": 4.4,
       "position": [
         720,
         -120
@@ -123,7 +123,7 @@
       "id": "a5",
       "name": "OpenAI (Chave do SaaS)",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "typeVersion": 4.4,
       "position": [
         720,
         120

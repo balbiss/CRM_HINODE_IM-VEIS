@@ -267,3 +267,8 @@ seção 3 e faça commit. Antes do commit:
 ```bash
 grep -rnE '[0-9a-f]{24,}|https://api[-a-z0-9]*\.visitaia|waha\.visitaia' n8n/fluxos/ && echo "TEM SEGREDO/URL — não commitar"
 ```
+
+- **Versão de nó acima da instância.** Ao ativar, o erro `Cannot read properties of undefined (reading 'execute')`
+  quer dizer que algum nó está numa versão que esse n8n não tem (aconteceu no n8n 2.21.7 com Set 3.5 e HTTP
+  Request 4.5). Os JSONs daqui usam Set 3.4 e HTTP Request 4.4, que existem nas duas instâncias. Pra ver o que a
+  instância aceita: `GET /types/nodes.json` logado no editor.

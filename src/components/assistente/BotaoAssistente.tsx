@@ -25,8 +25,8 @@ export function BotaoAssistente() {
       }}>
       <span style={{
         width: 20, height: 20, borderRadius: '50%', flex: 'none',
-        background: 'radial-gradient(circle at 35% 30%, #a5f3fc, #0ea5e9 45%, #1e3a8a 100%)',
-        boxShadow: online ? '0 0 10px #38bdf8' : 'none', animation: online ? 'orbePulso 1.6s ease-in-out infinite' : 'none',
+        background: 'radial-gradient(circle at 35% 30%, #F6DCC4, #C97C46 45%, #8B4A21 100%)',
+        boxShadow: online ? '0 0 10px #C97C46' : 'none', animation: online ? 'orbePulso 1.6s ease-in-out infinite' : 'none',
       }} />
       <span className="botao-assistente-nome">{config.nome}</span>
     </button>

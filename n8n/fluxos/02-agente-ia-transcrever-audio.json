@@ -39,7 +39,7 @@
       "id": "t2",
       "name": "Baixar Áudio",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "typeVersion": 4.4,
       "position": [
         240,
         0
@@ -109,7 +109,7 @@
       "id": "t5",
       "name": "Transcrever (Chave da Imobiliária)",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "typeVersion": 4.4,
       "position": [
         920,
         -120
@@ -163,7 +163,7 @@
       "id": "t6",
       "name": "Transcrever (Chave do SaaS)",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "typeVersion": 4.4,
       "position": [
         920,
         120
