@@ -1,12 +1,71 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { filasAtendimento, roletas, perfis, leads, colunasKanban, distribuicaoLog, notificacoes } from '../db/schema.js';
+import { filasAtendimento, roletas, perfis, leads, colunasKanban, distribuicaoLog, notificacoes, imobiliarias } from '../db/schema.js';
 import { enviarPush } from './push.js';
 import { registrarEvento } from './eventos.js';
+import { numeroCentralDoLead } from './numeros.js';
 import { dispararGatilhoLeadNovo } from './followup.js';
 import type { Server as SocketServer } from 'socket.io';
 
 type Roleta = typeof roletas.$inferSelect;
+
+/** Avisa o corretor por WhatsApp (número central, no celular PESSOAL dele) que um lead novo
+ *  caiu pra ele — só quando a imobiliária ligou essa opção. Nunca lança — falha aqui não pode
+ *  derrubar a atribuição do lead, que já aconteceu antes desta função ser chamada.
+ *
+ *  O envio em si NÃO é feito por aqui — só empurra os dados pra um webhook do n8n
+ *  (N8N_AVISO_CORRETOR_WEBHOOK_URL), que decide como mandar de verdade. Decisão deliberada:
+ *  já tentamos WAHA (bug conhecido devlikeapro/waha#2214, "no LID found" — falha consistente
+ *  pra mensagem iniciada pelo sistema) e um serviço Baileys dedicado (crashava de forma
+ *  reproduzível logo após o primeiro pareamento) — os dois direto no código do CRM. Botar
+ *  essa etapa no n8n permite trocar o motor de envio sem precisar redeployar o backend. */
+async function notificarCorretorPorWhatsapp(
+  imobiliariaId: string,
+  leadId: string,
+  corretorId: string,
+  roletaId: string,
+  lead: { nome: string; telefone: string; email: string | null; campanha: string | null; canal: string; sessaoWhatsappId: string | null },
+  numeroDaRoleta: string | null,
+) {
+  try {
+    const [imob] = await db.select({ ligado: imobiliarias.notificarCorretorWhatsapp })
+      .from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
+    if (!imob?.ligado) return;
+
+    const webhookUrl = process.env.N8N_AVISO_CORRETOR_WEBHOOK_URL;
+    if (!webhookUrl) {
+      registrarEvento(imobiliariaId, leadId, 'aviso', 'Webhook de aviso ao corretor não configurado — não deu pra avisar por WhatsApp.', 'Sistema');
+      return;
+    }
+
+    const [corretor] = await db.select({ nome: perfis.nome, telefone: perfis.telefone }).from(perfis).where(eq(perfis.id, corretorId)).limit(1);
+    if (!corretor?.telefone) {
+      registrarEvento(imobiliariaId, leadId, 'aviso', 'Corretor sem telefone cadastrado — não deu pra avisar por WhatsApp.', 'Sistema');
+      return;
+    }
+
+    // Com várias caixas de entrada: avisa pelo número por onde o lead chegou (ou o da roleta), e
+    // não mais sempre pelo 1º número conectado — que podia até estar desconectado.
+    const numero = await numeroCentralDoLead({ imobiliariaId, sessaoWhatsappId: lead.sessaoWhatsappId }, { preferidoId: numeroDaRoleta });
+    if (!numero) {
+      registrarEvento(imobiliariaId, leadId, 'aviso', 'Nenhum número central conectado — não deu pra avisar o corretor por WhatsApp.', 'Sistema');
+      return;
+    }
+
+    const r = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imobiliariaId, leadId, corretorId, roletaId, sessionName: numero.sessionName,
+        corretorNome: corretor.nome, corretorTelefone: corretor.telefone,
+        lead: { nome: lead.nome, telefone: lead.telefone, email: lead.email, campanha: lead.campanha, canal: lead.canal },
+      }),
+    });
+    if (!r.ok) throw new Error('webhook n8n -> ' + r.status);
+  } catch (e) {
+    registrarEvento(imobiliariaId, leadId, 'aviso', 'Erro ao avisar o corretor por WhatsApp: ' + (e as Error).message, 'Sistema');
+  }
+}
 
 /** Garante que a imobiliária tem pelo menos uma roleta padrão. Retorna o id dela. */
 export async function garantirRoletaPadrao(imobiliariaId: string): Promise<string> {
@@ -19,7 +78,7 @@ export async function garantirRoletaPadrao(imobiliariaId: string): Promise<strin
 
 /** Escolhe a roleta que deve receber o lead, pelas regras de entrada (número > canal > finalidade).
  *  Cai na roleta padrão se nenhuma regra específica casar. */
-async function escolherRoleta(
+export async function escolherRoleta(
   imobiliariaId: string,
   lead: { canal: string; finalidade: string | null; sessaoWhatsappId: string | null },
 ): Promise<Roleta | null> {
@@ -46,38 +105,103 @@ async function escolherRoleta(
   return todas.find(r => r.padrao) ?? null;
 }
 
+/** Fila fixa: quem vem depois de `ultimoId` na ordem da roleta (dá a volta no fim), pulando
+ *  bloqueado. Sem último conhecido, começa pelo 1º da lista. */
+export function proximoDaFilaFixa(
+  membros: { corretorId: string; posicao: number; bloqueado: boolean }[],
+  ultimoId: string | null,
+): string | null {
+  const ordem = [...membros].sort((a, b) => a.posicao - b.posicao);
+  const i = ordem.findIndex(m => m.corretorId === ultimoId);
+  for (let k = 1; k <= ordem.length; k++) {
+    const m = ordem[(i + k) % ordem.length];
+    if (!m.bloqueado) return m.corretorId;
+  }
+  return null;
+}
+
+/** Modo "avisar corretor por WhatsApp": fila fixa 1 → 2 → … → último → 1, pela ordem da tela.
+ *  Trava a linha da roleta durante a escolha pra dois leads simultâneos não caírem no mesmo
+ *  corretor. Retorna o corretor escolhido (lead já atribuído), ou null. */
+async function atribuirPelaFilaFixa(roleta: Roleta, leadId: string): Promise<{ corretorId: string; lead: typeof leads.$inferSelect } | null> {
+  return db.transaction(async tx => {
+    await tx.execute(sql`select id from roletas where id = ${roleta.id} for update`);
+    const [atual] = await tx.select({ ultimo: roletas.ultimoCorretorId }).from(roletas).where(eq(roletas.id, roleta.id)).limit(1);
+    const membros = await tx.select({
+      corretorId: filasAtendimento.corretorId, posicao: filasAtendimento.posicao,
+      bloqueado: perfis.bloqueado, ultimaAtribuicao: filasAtendimento.ultimaAtribuicao,
+    }).from(filasAtendimento)
+      .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
+      .where(eq(filasAtendimento.roletaId, roleta.id));
+    // Roleta que acabou de entrar na fila fixa: continua de quem recebeu por último.
+    let ultimo = atual?.ultimo ?? null;
+    if (!ultimo) {
+      const recente = membros.filter(m => m.ultimaAtribuicao)
+        .sort((a, b) => b.ultimaAtribuicao!.getTime() - a.ultimaAtribuicao!.getTime())[0];
+      ultimo = recente?.corretorId ?? null;
+    }
+    const escolhido = proximoDaFilaFixa(membros, ultimo);
+    if (!escolhido) return null;
+
+    const [lead] = await tx.update(leads).set({ corretorId: escolhido })
+      .where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
+    if (!lead) return null;
+    await tx.update(roletas).set({ ultimoCorretorId: escolhido }).where(eq(roletas.id, roleta.id));
+    await tx.update(filasAtendimento).set({ ultimaAtribuicao: new Date() })
+      .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(filasAtendimento.corretorId, escolhido)));
+    return { corretorId: escolhido, lead };
+  });
+}
+
 /** Distribui UM lead pro próximo corretor da roleta que o recebe (o que está em plantão e faz
  *  mais tempo que não recebe um lead DESSA roleta). Retorna o corretorId, ou null. */
 export async function distribuirLead(io: SocketServer, imobiliariaId: string, leadId: string): Promise<string | null> {
   const [dados] = await db.select({
     canal: leads.canal, finalidade: leads.finalidade, sessaoWhatsappId: leads.sessaoWhatsappId, corretorId: leads.corretorId,
+    iaStatus: leads.iaStatus, importacaoPendente: leads.importacaoPendente,
   }).from(leads).where(eq(leads.id, leadId)).limit(1);
-  if (!dados || dados.corretorId) return null;
+  // Lead nas mãos do Agente de IA não entra na roleta (nem pelo "distribuir pendentes" do plantão):
+  // quem manda pra roleta, quando terminar, é o próprio agente (lib/agenteIa.ts).
+  // Lead de planilha ainda guardado também não: quem distribui é o dono/gerente pelo lote.
+  if (!dados || dados.corretorId || dados.iaStatus === 'atendendo' || dados.importacaoPendente) return null;
 
   const roleta = await escolherRoleta(imobiliariaId, dados);
   if (!roleta) return null;
 
-  const candidatos = await db
-    .select({ corretorId: filasAtendimento.corretorId })
-    .from(filasAtendimento)
-    .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
-    .where(and(
-      eq(filasAtendimento.roletaId, roleta.id),
-      eq(perfis.emPlantao, true),
-      eq(perfis.bloqueado, false),
-    ))
-    .orderBy(sql`${filasAtendimento.ultimaAtribuicao} asc nulls first`, asc(filasAtendimento.posicao))
-    .limit(1);
+  // No modo "avisar corretor por WhatsApp" (ver notificarCorretorPorWhatsapp abaixo), o
+  // corretor nunca abre o CRM — então "em plantão" deixa de fazer sentido como filtro:
+  // todo membro da roleta (não bloqueado) é candidato, o tempo todo, em qualquer horário.
+  const [imob] = await db.select({ semPlantao: imobiliarias.notificarCorretorWhatsapp })
+    .from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
 
-  const escolhido = candidatos[0];
-  if (!escolhido) return null;
+  // E a ordem vira fila fixa (1, 2, 3… e volta), que é o que o corretor enxerga na tela e confere.
+  let escolhido: { corretorId: string };
+  let lead: typeof leads.$inferSelect;
+  if (imob?.semPlantao) {
+    const r = await atribuirPelaFilaFixa(roleta, leadId);
+    if (!r) return null;
+    escolhido = { corretorId: r.corretorId };
+    lead = r.lead;
+  } else {
+    // Modo normal: vai pro corretor em plantão que faz mais tempo sem receber desta roleta.
+    const candidatos = await db
+      .select({ corretorId: filasAtendimento.corretorId })
+      .from(filasAtendimento)
+      .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
+      .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(perfis.bloqueado, false), eq(perfis.emPlantao, true)))
+      .orderBy(sql`${filasAtendimento.ultimaAtribuicao} asc nulls first`, asc(filasAtendimento.posicao))
+      .limit(1);
+    if (!candidatos[0]) return null;
+    escolhido = candidatos[0];
 
-  await db.update(filasAtendimento).set({ ultimaAtribuicao: new Date() })
-    .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(filasAtendimento.corretorId, escolhido.corretorId)));
+    await db.update(filasAtendimento).set({ ultimaAtribuicao: new Date() })
+      .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(filasAtendimento.corretorId, escolhido.corretorId)));
 
-  const [lead] = await db.update(leads).set({ corretorId: escolhido.corretorId })
-    .where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
-  if (!lead) return null;
+    const [atribuido] = await db.update(leads).set({ corretorId: escolhido.corretorId })
+      .where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
+    if (!atribuido) return null;
+    lead = atribuido;
+  }
 
   await db.insert(distribuicaoLog).values({ imobiliariaId, leadId, corretorId: escolhido.corretorId, origem: 'roleta', roletaId: roleta.id });
   const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, escolhido.corretorId)).limit(1);
@@ -98,6 +222,10 @@ export async function distribuirLead(io: SocketServer, imobiliariaId: string, le
     tag: 'lead-' + lead.id,
   }).catch(() => {});
   void dispararGatilhoLeadNovo(io, imobiliariaId, leadId, escolhido.corretorId);
+  void notificarCorretorPorWhatsapp(imobiliariaId, leadId, escolhido.corretorId, roleta.id, {
+    nome: lead.nome, telefone: lead.telefone, email: lead.email, campanha: lead.campanha, canal: lead.canal,
+    sessaoWhatsappId: lead.sessaoWhatsappId,
+  }, roleta.sessaoWhatsappId ?? roleta.numeroPrimeiroContatoId ?? null);
   return escolhido.corretorId;
 }
 
@@ -109,7 +237,7 @@ export async function distribuirPendentes(io: SocketServer, imobiliariaId: strin
   if (!colNovo) return 0;
 
   const pendentes = await db.select({ id: leads.id }).from(leads)
-    .where(and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.colunaId, colNovo.id), isNull(leads.corretorId)))
+    .where(and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.colunaId, colNovo.id), isNull(leads.corretorId), eq(leads.importacaoPendente, false)))
     .orderBy(asc(leads.criadoEm));
 
   let n = 0;

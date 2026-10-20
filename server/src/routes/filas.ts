@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/client.js';
-import { filasAtendimento, roletas, perfis, imobiliarias, distribuicaoLog, leads } from '../db/schema.js';
+import { filasAtendimento, roletas, perfis, imobiliarias, distribuicaoLog, leads, recusasLead } from '../db/schema.js';
 import { desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { isBusinessHoursOpen, horarioAtendimentoLabel } from '../lib/schedule.js';
@@ -54,7 +55,24 @@ export function filasRouter(io: SocketServer) {
       .where(role === 'corretor' ? and(base, eq(distribuicaoLog.corretorId, sub)) : base)
       .orderBy(desc(distribuicaoLog.criadoEm))
       .limit(100);
-    res.json(rows);
+    // recusas (clicou Recusar ou deixou o tempo acabar) entram na mesma linha do tempo
+    const para = alias(perfis, 'para');
+    const baseR = eq(recusasLead.imobiliariaId, imobiliariaId);
+    const recusas = await db.select({
+      criadoEm: recusasLead.criadoEm, motivo: recusasLead.motivo,
+      leadNome: leads.nome, corretorNome: perfis.nome, corretorId: recusasLead.corretorId, paraNome: para.nome,
+    }).from(recusasLead)
+      .innerJoin(leads, eq(leads.id, recusasLead.leadId))
+      .innerJoin(perfis, eq(perfis.id, recusasLead.corretorId))
+      .leftJoin(para, eq(para.id, recusasLead.redistribuidoParaId))
+      .where(role === 'corretor' ? and(baseR, eq(recusasLead.corretorId, sub)) : baseR)
+      .orderBy(desc(recusasLead.criadoEm))
+      .limit(100);
+    const tudo = [
+      ...rows.map(r => ({ ...r, tipo: 'entrega' as const })),
+      ...recusas.map(r => ({ ...r, tipo: 'recusa' as const, origem: r.motivo, roletaNome: null })),
+    ].sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime()).slice(0, 150);
+    res.json(tudo);
   });
 
   const toggleSchema = z.object({ corretorId: z.string().uuid() });

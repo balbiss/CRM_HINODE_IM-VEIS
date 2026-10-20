@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -11,14 +11,20 @@ import { ImportModal } from './ImportModal';
 import { NewLeadModal } from './NewLeadModal';
 import { AlertTester } from './AlertTester';
 import { Toasts } from './Toasts';
+import { FacebookAlerta } from './FacebookAlerta';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
+import { useAssistente } from '../lib/assistente/estado';
+
+// Assistente de voz: só baixa o código (Gemini + gestos) quando alguém abre.
+const Assistente = lazy(() => import('./assistente/Assistente'));
 
 export function AppShell() {
   const theme = useAppStore(s => s.theme);
   const sidebarOpen = useAppStore(s => s.sidebarOpen);
   const enforceHorarioComercial = useAppStore(s => s.enforceHorarioComercial);
   const { meNome } = useRoleInfo();
+  const assistenteNaTela = useAssistente(s => s.aberto || s.paineis.length > 0);
 
   useEffect(() => {
     enforceHorarioComercial(meNome);
@@ -50,6 +56,7 @@ export function AppShell() {
         <div className="content-col" style={{ marginLeft: sidebarOpen ? 248 : 68, minWidth: 0, display: 'flex', flexDirection: 'column', transition: 'margin-left .18s ease' }}>
           <div style={{ position: 'sticky', top: 0, zIndex: 30 }}>
             <Topbar />
+            <FacebookAlerta />
           </div>
           <main className="app-main" style={{ flex: 1, padding: '22px 34px 48px', minWidth: 0 }}>
             <Outlet />
@@ -66,6 +73,7 @@ export function AppShell() {
       <NewLeadModal />
       <AlertTester />
       <Toasts />
+      {assistenteNaTela && <Suspense fallback={null}><Assistente /></Suspense>}
     </div>
   );
 }

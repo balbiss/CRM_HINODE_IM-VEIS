@@ -1,0 +1,2 @@
+ALTER TABLE "agentes_ia" ALTER COLUMN "espera_segundos" SET DEFAULT 8;--> statement-breakpoint
+ALTER TABLE "agentes_ia" ADD COLUMN "mensagem_desqualificado" text DEFAULT 'Obrigada pelas informações! Registrei tudo aqui e, se surgir uma opção que combine com o que você procura, nossa equipe entra em contato. 😊' NOT NULL;

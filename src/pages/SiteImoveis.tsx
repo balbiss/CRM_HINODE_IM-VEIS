@@ -112,7 +112,7 @@ export default function SiteImoveis() {
           <div style={card}>
             <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 12px' }}>Marca</p>
             <div style={{ display: 'grid', gap: 12 }}>
-              <div><label style={lbl}>Nome exibido</label><input value={cfg.nomeExibicao} onChange={e => set({ nomeExibicao: e.target.value })} style={inp} placeholder="Ex: Hinode Imóveis" /></div>
+              <div><label style={lbl}>Nome exibido</label><input value={cfg.nomeExibicao} onChange={e => set({ nomeExibicao: e.target.value })} style={inp} placeholder="Ex: Realiza Vale Imóveis" /></div>
               <UploadImagem label="Logomarca" url={cfg.logoUrl} onChange={u => set({ logoUrl: u })} previewLogo
                 dica="PNG com fundo transparente, na horizontal. Ideal: 480 × 140 px (ou proporção parecida). Aparece com ~54 px de altura no site — mande em alta pra não ficar borrada." />
               <div>

@@ -7,6 +7,7 @@ import {
 } from '../db/schema.js';
 import { registrarEvento } from './eventos.js';
 import { checarNumero } from './waha.js';
+import { numeroCentralDoLead } from './numeros.js';
 
 type Fluxo = typeof followupFluxos.$inferSelect;
 
@@ -84,13 +85,10 @@ async function execucaoViva(leadId: string) {
 }
 
 /** Sessão do WhatsApp que vai despachar essa régua (central ou do corretor). */
-async function sessaoDespacho(imobiliariaId: string, corretorId: string | null) {
+async function sessaoDespacho(imobiliariaId: string, corretorId: string | null, sessaoDoLead: string | null) {
   const [imob] = await db.select({ modo: imobiliarias.modoWhatsapp }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
-  if (imob?.modo === 'central') {
-    const [s] = await db.select().from(sessoesWhatsapp)
-      .where(and(eq(sessoesWhatsapp.imobiliariaId, imobiliariaId), eq(sessoesWhatsapp.escopo, 'central'), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
-    return s ?? null;
-  }
+  // com várias caixas de entrada: o mesmo número pelo qual o lead chegou (é por ele que a régua sai)
+  if (imob?.modo === 'central') return numeroCentralDoLead({ imobiliariaId, sessaoWhatsappId: sessaoDoLead });
   if (corretorId) {
     const [s] = await db.select().from(sessoesWhatsapp)
       .where(and(eq(sessoesWhatsapp.corretorId, corretorId), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
@@ -127,8 +125,8 @@ export async function iniciarFollowup(io: SocketServer, opts: IniciarOpts): Prom
 
   // Check de número antes da 1ª mensagem (só quando há sessão conectada pra checar).
   if (opts.automatico) {
-    const [lead] = await db.select({ telefone: leads.telefone, nome: leads.nome }).from(leads).where(eq(leads.id, opts.leadId)).limit(1);
-    const sessao = await sessaoDespacho(opts.imobiliariaId, opts.corretorId);
+    const [lead] = await db.select({ telefone: leads.telefone, nome: leads.nome, sessaoWhatsappId: leads.sessaoWhatsappId }).from(leads).where(eq(leads.id, opts.leadId)).limit(1);
+    const sessao = await sessaoDespacho(opts.imobiliariaId, opts.corretorId, lead?.sessaoWhatsappId ?? null);
     if (lead && sessao) {
       const existe = await checarNumero(sessao.sessionName, lead.telefone);
       if (existe === false) {
@@ -256,17 +254,26 @@ export async function varrerFollowups(io: SocketServer): Promise<number> {
 
       const { despacharPeloWhatsapp } = await import('../routes/whatsapp.js');
       const r = await despacharPeloWhatsapp({
-        imobiliariaId: ex.imobiliariaId, telefone: lead.telefone, corretorId: ex.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
+        imobiliariaId: ex.imobiliariaId, leadId: lead.id, telefone: lead.telefone, corretorId: ex.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
         texto, anexoUrl: passo.anexoUrl, anexoTipo: anexoTipo as 'imagem' | 'audio' | 'documento' | null, anexoNome: passo.anexoNome,
       });
       if (!r.enviado) {
-        // sem sessão conectada agora — tenta de novo em 15 min, sem avançar
+        if (r.erro === 'NUMERO_INEXISTENTE') {
+          // número sem WhatsApp: não adianta tentar de novo
+          await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: 'número sem WhatsApp', proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
+          registrarEvento(ex.imobiliariaId, lead.id, 'followup', 'Follow-up encerrado: o número não tem WhatsApp', fluxo.nome);
+          io.to('imobiliaria:' + ex.imobiliariaId).emit('followup:mudou', { leadId: lead.id });
+          continue;
+        }
+        // sem sessão conectada / falha no envio — tenta de novo em 15 min, sem avançar
+        console.error('followup: não enviou (execução ' + ex.id + ', lead ' + lead.id + '):', r.erro);
         await db.update(followupExecucoes).set({ proximoEnvioEm: new Date(agora.getTime() + 15 * 60000) }).where(eq(followupExecucoes.id, ex.id));
         continue;
       }
 
       const [msg] = await db.insert(mensagensWhatsapp).values({
-        leadId: lead.id, direcao: 'out', canal: 'followup', enviadoPor: ex.corretorId, ackStatus: 1,
+        leadId: lead.id, direcao: 'out', canal: 'followup', enviadoPor: ex.corretorId, ackStatus: r.waMessageId ? 2 : 1,
+        waMessageId: r.waMessageId ?? null, waChave: r.waChave ?? null,
         texto: texto ?? null, anexoUrl: passo.anexoUrl ?? null, anexoTipo, anexoNome: passo.anexoNome ?? null,
       }).returning();
       io.to('imobiliaria:' + ex.imobiliariaId).emit('mensagem:created', msg);

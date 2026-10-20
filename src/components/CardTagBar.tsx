@@ -97,6 +97,8 @@ export function CardTagBar({ lead }: { lead: Lead }) {
   };
 
   return (
+    <>
+    {minhas.length > 0 && <TagChips tags={minhas} style={{ marginTop: 8 }} />}
     <div
       style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}
       onClick={e => e.stopPropagation()}
@@ -228,6 +230,23 @@ export function CardTagBar({ lead }: { lead: Lead }) {
         )}
       </div>
     </div>
+    </>
+  );
+}
+
+/** Etiquetas como selos coloridos COM o nome (a bandeirinha sozinha era pequena demais pra ler). */
+export function TagChips({ tags: lista, max = 3, style }: { tags: { id: string; nome: string; cor: string }[]; max?: number; style?: React.CSSProperties }) {
+  return (
+    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0, ...style }}>
+      {lista.slice(0, max).map(t => (
+        <span key={t.id} title={t.nome} style={{
+          display: 'inline-flex', alignItems: 'center', maxWidth: 140, padding: '2px 8px', borderRadius: 20,
+          background: t.cor, color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: 1.4,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{t.nome}</span>
+      ))}
+      {lista.length > max && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>+{lista.length - max}</span>}
+    </span>
   );
 }
 

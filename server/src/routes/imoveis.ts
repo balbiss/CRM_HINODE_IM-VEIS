@@ -38,6 +38,7 @@ const bodySchema = z.object({
   aceitaFinanciamento: z.boolean().optional(),
   valorCondominio: z.number().nonnegative().nullable().optional(),
   valorIptu: z.number().nonnegative().nullable().optional(),
+  nomesCampanha: z.array(z.string().trim().min(2).max(60)).max(20).optional(),
 });
 
 imoveisRouter.post('/', requireRole('dono', 'gerente'), async (req, res) => {

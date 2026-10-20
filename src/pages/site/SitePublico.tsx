@@ -16,6 +16,9 @@ interface SiteData { slug: string; config: SiteConfig; imoveis: SiteImovel[] }
 const BRL = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 const soDigitos = (s: string) => (s || '').replace(/\D/g, '');
 
+// O cadastro grava "Venda"/"Aluguel"; o site fala "Comprar"/"Alugar".
+const ehAluguel = (finalidade: string) => /alug|loca/i.test(finalidade || '');
+
 export default function SitePublico() {
   const { slug = '' } = useParams();
   const [data, setData] = useState<SiteData | null>(null);
@@ -52,7 +55,7 @@ export default function SitePublico() {
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (data?.imoveis || []).filter(i => {
-      if (fin !== 'Todos' && i.finalidade !== fin) return false;
+      if (fin !== 'Todos' && ehAluguel(i.finalidade) !== (fin === 'Alugar')) return false;
       if (tipo !== 'Todos' && i.tipo !== tipo) return false;
       if (q && !(i.titulo + ' ' + (i.cidade || '') + ' ' + (i.endereco || '')).toLowerCase().includes(q)) return false;
       return true;
@@ -62,7 +65,7 @@ export default function SitePublico() {
   function abrir(im: SiteImovel) { setAberto(im); setImgIdx(0); }
   function scrollTo(id: string) { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }); }
   function interesse(im: SiteImovel) {
-    setForm(f => ({ ...f, imovel: im.titulo, imovelId: im.id, interesse: f.interesse || (im.finalidade === 'Alugar' ? 'Alugar' : 'Comprar'), mensagem: f.mensagem || 'Tenho interesse no imóvel: ' + im.titulo }));
+    setForm(f => ({ ...f, imovel: im.titulo, imovelId: im.id, interesse: f.interesse || (ehAluguel(im.finalidade) ? 'Alugar' : 'Comprar'), mensagem: f.mensagem || 'Tenho interesse no imóvel: ' + im.titulo }));
     setAberto(null);
     scrollTo('contato');
   }
@@ -164,7 +167,7 @@ export default function SitePublico() {
               <div style={{ padding: 16 }}>
                 <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>{im.titulo}</p>
                 <p style={{ fontSize: 13, color: '#777', margin: '0 0 10px' }}>{[im.endereco, im.cidade].filter(Boolean).join(' · ') || im.tipo}</p>
-                <p style={{ fontSize: 19, fontWeight: 800, color: brand, margin: '0 0 8px' }}>{BRL(im.preco)}{im.finalidade === 'Alugar' ? '/mês' : ''}</p>
+                <p style={{ fontSize: 19, fontWeight: 800, color: brand, margin: '0 0 8px' }}>{BRL(im.preco)}{ehAluguel(im.finalidade) ? '/mês' : ''}</p>
                 {specIcons(im) && <p style={{ fontSize: 12.5, color: '#888', margin: 0 }}>{specIcons(im)}</p>}
               </div>
             </button>
@@ -294,7 +297,7 @@ export default function SitePublico() {
               <span style={{ background: brand + '15', color: brand, fontSize: 11.5, fontWeight: 800, padding: '4px 10px', borderRadius: 20, textTransform: 'uppercase' }}>{aberto.finalidade} · {aberto.tipo}</span>
               <h3 style={{ fontSize: 23, fontWeight: 800, margin: '12px 0 4px' }}>{aberto.titulo}</h3>
               <p style={{ fontSize: 14, color: '#777', margin: '0 0 12px' }}>{[aberto.endereco, aberto.cidade, aberto.estado].filter(Boolean).join(', ')}</p>
-              <p style={{ fontSize: 26, fontWeight: 800, color: brand, margin: '0 0 4px' }}>{BRL(aberto.preco)}{aberto.finalidade === 'Alugar' ? '/mês' : ''}</p>
+              <p style={{ fontSize: 26, fontWeight: 800, color: brand, margin: '0 0 4px' }}>{BRL(aberto.preco)}{ehAluguel(aberto.finalidade) ? '/mês' : ''}</p>
               {aberto.valorCondominio ? <p style={{ fontSize: 13, color: '#888', margin: '0 0 16px' }}>+ condomínio {BRL(aberto.valorCondominio)}</p> : <div style={{ height: 12 }} />}
               <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13.5, color: '#555', marginBottom: 16 }}>
                 {aberto.quartos ? <span><b>{aberto.quartos}</b> quartos</span> : null}

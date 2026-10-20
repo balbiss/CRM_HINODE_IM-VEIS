@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { LayoutGrid, List as ListIcon, X, FileText, MoreVertical, ChevronLeft, ChevronRight, Plus, Check } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, X, FileText, MoreVertical, ChevronLeft, ChevronRight, Plus, Check, Clock } from 'lucide-react';
+import { dataHoraCompleta, dataHoraCurta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { canalPill } from '../lib/format';
@@ -243,6 +244,7 @@ export default function Kanban() {
             <span style={{ width: 110 }}>Canal</span>
             {isManager && <span style={{ flex: 1 }}>Corretor</span>}
             <span style={{ width: 180 }}>Coluna</span>
+            <span style={{ width: 110 }}>Entrou em</span>
             <span style={{ width: 90 }}>Tempo</span>
           </div>
           {leads.slice(0, visivelLista).map((l, i) => (
@@ -265,6 +267,7 @@ export default function Kanban() {
                   {colunas.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
                 </select>
               </span>
+              <span title={dataHoraCompleta(l.criadoEm)} style={{ width: 110, fontSize: 12, color: 'var(--muted)' }}>{dataHoraCurta(l.criadoEm)}</span>
               <span style={{ width: 90, fontSize: 11, color: 'var(--muted)' }}>{l.dias === 0 ? 'hoje' : l.dias + 'd'}</span>
             </div>
           ))}
@@ -369,8 +372,19 @@ export default function Kanban() {
                             <span style={{ display: 'block', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, minWidth: 0 }}>
                               <FileText size={11} strokeWidth={2} style={{ flex: 'none' }} />
-                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.corretor || 'Sem corretor'}</span>
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.corretor || (l.iaStatus === 'atendendo' ? 'IA atendendo' : 'Sem corretor')}</span>
                             </span>
+                            {l.criadoEm && (
+                              <span title={'Entrou no CRM em ' + dataHoraCompleta(l.criadoEm)} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
+                                <Clock size={11} strokeWidth={2} style={{ flex: 'none' }} />
+                                Entrou {dataHoraCurta(l.criadoEm)}
+                              </span>
+                            )}
+                            {l.segundo && (
+                              <span title="Essa pessoa preencheu um formulário de novo — veja o Histórico do lead" style={{ display: 'inline-block', marginTop: 4, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 20, background: 'var(--terraSoft)', color: 'var(--terra)' }}>
+                                Cadastrou de novo
+                              </span>
+                            )}
                           </span>
                         </div>
                         <CardTagBar lead={l} />

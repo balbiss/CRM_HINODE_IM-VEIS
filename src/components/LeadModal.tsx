@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
+import { dataHoraCompleta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { CADENCIAS, MOTIVOS_DESCARTE, APROVACAO, mapMsgs } from '../lib/data';
@@ -11,6 +12,7 @@ import { Visto } from './Visto';
 import { ChatAvatar } from './ChatAvatar';
 import { AudioRecordButton } from './AudioRecordButton';
 import { EmojiPicker } from './EmojiPicker';
+import { AvisoJanelaOficial } from './WhatsappOficial';
 
 const TABS: Array<[string, string]> = [
   ['detalhes', 'Detalhes'], ['chat', 'Chat WhatsApp'], ['followup', 'Follow-up'], ['historico', 'Histórico'],
@@ -124,6 +126,9 @@ export function LeadModal() {
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontFamily: 'Newsreader,serif', fontSize: 26, lineHeight: 1.15 }}>{L.nome}</span>
             <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>{L.tel} · {L.corretor} · {colAtual}</span>
+            {L.criadoEm && (
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>Entrou no CRM em {dataHoraCompleta(L.criadoEm)}</span>
+            )}
           </span>
           <span style={css(canalPill(L.canal) + ';align-self:center')}>{L.canal}</span>
           <button onClick={closeLead} style={{ border: '1px solid var(--line)', background: 'none', width: 30, height: 30, borderRadius: 8, flex: 'none' }}>×</button>
@@ -152,6 +157,12 @@ export function LeadModal() {
                   </div>
                 ))}
               </div>
+              {L.iaResumo && (
+                <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid #0F5E57', borderRadius: 10, background: 'var(--card)' }}>
+                  <p style={{ margin: '0 0 6px', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: '#0F5E57', fontWeight: 700 }}>Qualificação feita pelo Agente de IA</p>
+                  {L.iaResumo.split('\n').map(linha => <p key={linha} style={{ margin: '2px 0', fontSize: 13.5 }}>{linha}</p>)}
+                </div>
+              )}
               {(() => {
                 const imv = L.imovelInteresseId ? imoveis.find(i => i.id === L.imovelInteresseId) : null;
                 if (!L.imovel && !imv) return null;
@@ -262,7 +273,9 @@ export function LeadModal() {
                     <div style={css(m.rowStyle)}>
                       <span style={css(m.bubbleStyle)}>
                         {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Follow-up automático</span>}
+                        {m.ia && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Agente de IA</span>}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFimChat} />}
+                        {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
                         {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
                       </span>
@@ -279,6 +292,7 @@ export function LeadModal() {
                 )}
                 
               </div>
+              <AvisoJanelaOficial leadId={L.id} qtdMensagens={chatMsgs.length} />
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
                 {quickTemplates.map(q => (
                   <button key={q.label} onClick={() => setDraft(q.texto)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>{q.label}</button>

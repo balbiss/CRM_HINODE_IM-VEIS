@@ -127,6 +127,7 @@ function ImovelModal({ imovel, onClose, onSave }: {
   const [aceitaFinanciamento, setAceitaFinanciamento] = useState(imovel?.aceitaFinanciamento ?? true);
   const [valorCondominio, setValorCondominio] = useState(imovel?.valorCondominio ?? '');
   const [valorIptu, setValorIptu] = useState(imovel?.valorIptu ?? '');
+  const [nomesCampanha, setNomesCampanha] = useState((imovel?.nomesCampanha ?? []).join(', '));
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
@@ -144,6 +145,7 @@ function ImovelModal({ imovel, onClose, onSave }: {
       aceitaFinanciamento,
       valorCondominio: valorCondominio ? Number(valorCondominio) : null,
       valorIptu: valorIptu ? Number(valorIptu) : null,
+      nomesCampanha: nomesCampanha.split(',').map(n => n.trim()).filter(n => n.length >= 2),
     });
     setSaving(false);
   };
@@ -242,6 +244,12 @@ function ImovelModal({ imovel, onClose, onSave }: {
           </span>
           <span style={{ fontSize: 12.5, fontWeight: 600 }}>Aceita financiamento</span>
         </button>
+        <label style={fieldLabel}>Nome na campanha de anúncio (opcional)</label>
+        <input value={nomesCampanha} onChange={e => setNomesCampanha(e.target.value)} style={fieldInput} placeholder="Ex.: CENARIUM" />
+        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '-8px 0 14px', lineHeight: 1.4 }}>
+          Se o nome da campanha na Meta ou no site contém essa palavra (ex.: [NC 02][CENARIUM][FORM]), o lead já chega ligado
+          a este imóvel e o Agente de IA fala dele. Mais de um nome: separe por vírgula.
+        </p>
         <label style={fieldLabel}>Amenidades (separadas por vírgula)</label>
         <input value={amenidades} onChange={e => setAmenidades(e.target.value)} style={fieldInput} placeholder="Piscina, Academia, Portaria 24h" />
         <label style={fieldLabel}>Fotos</label>

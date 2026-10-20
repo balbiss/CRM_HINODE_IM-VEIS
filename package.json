@@ -10,11 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/genai": "^2.29.1",
+    "@mediapipe/tasks-vision": "^1.1.0",
     "@xyflow/react": "^12.11.6",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
+    "read-excel-file": "^5.8.8",
     "socket.io-client": "^4.8.3",
     "zustand": "^5.0.15"
   },

@@ -23,6 +23,9 @@ export interface RemoteLead {
   entrouNaColunaEm: string;
   criadoEm: string;
   tagIds?: string[];
+  iaStatus?: string | null;
+  iaResumo?: string | null;
+  sessaoWhatsappId?: string | null;
 }
 
 const CANAL_LABEL: Record<string, string> = { Indicacao: 'Indicação' };
@@ -64,5 +67,8 @@ export function mapRemoteLead(r: RemoteLead, colunas: RemoteColuna[], perfis: Re
     entrouNaColunaEm: r.entrouNaColunaEm,
     criadoEm: r.criadoEm,
     tags: r.tagIds ?? [],
+    iaStatus: r.iaStatus ?? '',
+    iaResumo: r.iaResumo ?? '',
+    sessaoWhatsappId: r.sessaoWhatsappId ?? null,
   };
 }

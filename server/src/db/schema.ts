@@ -11,7 +11,10 @@ export const sessaoEscopoEnum = pgEnum('sessao_escopo', ['central', 'corretor'])
 export const sessaoStatusEnum = pgEnum('sessao_status', ['desconectada', 'conectando', 'conectada']);
 export const canalEnum = pgEnum('canal', ['WhatsApp', 'Instagram', 'Facebook', 'Indicacao', 'Manual', 'Site']);
 export const direcaoEnum = pgEnum('direcao', ['in', 'out']);
-export const mensagemCanalEnum = pgEnum('mensagem_canal', ['corretor', 'followup']);
+export const mensagemCanalEnum = pgEnum('mensagem_canal', ['corretor', 'followup', 'ia']);
+// null = a IA nunca tocou nesse lead. 'transferido' = a IA terminou e mandou pra roleta.
+// 'pausado' = um humano assumiu no meio.
+export const iaStatusEnum = pgEnum('ia_status', ['atendendo', 'transferido', 'pausado']);
 export const aoEsgotarEnum = pgEnum('ao_esgotar', ['nada', 'descartar', 'mover']);
 export const execucaoStatusEnum = pgEnum('execucao_status', ['ativa', 'pausada', 'encerrada']);
 export const roletaFinalidadeEnum = pgEnum('roleta_finalidade', ['venda', 'locacao', 'ambos']);
@@ -39,6 +42,22 @@ export const imobiliarias = pgTable('imobiliarias', {
   // 'corretor' = cada corretor usa o próprio WhatsApp (padrão atual);
   // 'central'  = um número da imobiliária, todo mundo atende pelo CRM, dono/gerente veem tudo.
   modoWhatsapp: modoWhatsappEnum('modo_whatsapp').notNull().default('corretor'),
+  // "Modo direto por WhatsApp" (só faz sentido junto com modoWhatsapp='central'): ao atribuir
+  // um lead pela roleta, (1) manda os dados dele por WhatsApp (mesmo número central) pro
+  // celular PESSOAL do corretor — ele assume o atendimento pelo próprio número, fora do CRM —
+  // (2) a roleta IGNORA se o corretor está "em plantão" (todo membro não bloqueado é candidato,
+  // a qualquer hora) e (3) o front pula o popup de Aceitar/Recusar (a atribuição é definitiva).
+  notificarCorretorWhatsapp: boolean('notificar_corretor_whatsapp').notNull().default(false),
+  // Liberado pelo dono do SaaS (painel Plataforma). Sem isso a imobiliária nem vê o Agente de IA.
+  iaLiberada: boolean('ia_liberada').notNull().default(false),
+  // true = a IA roda na chave OpenAI do SaaS; false = a imobiliária precisa cadastrar a própria.
+  iaUsaChaveSaas: boolean('ia_usa_chave_saas').notNull().default(true),
+  // Assistente de voz (Gemini Live) dentro do CRM: liberado pela plataforma, com cota de minutos
+  // por mês; nome e voz a imobiliária escolhe.
+  assistenteLiberado: boolean('assistente_liberado').notNull().default(false),
+  assistenteMinutosMes: integer('assistente_minutos_mes').notNull().default(60),
+  assistenteNome: text('assistente_nome').notNull().default('Assistente'),
+  assistenteVoz: text('assistente_voz').notNull().default('Charon'),
 
   // --- Gestão da assinatura (painel Dono do SaaS) ---
   status: imobiliariaStatusEnum('status').notNull().default('ativa'),
@@ -54,6 +73,9 @@ export const imobiliarias = pgTable('imobiliarias', {
   // Quantas rebatidas cada corretor pode puxar do bolsão por dia (0 = ilimitado).
   limiteRebatidasDia: integer('limite_rebatidas_dia').notNull().default(5),
   observacoes: text('observacoes'),
+  // Dados cadastrais que a própria imobiliária edita em Ajustes → Imobiliária.
+  cnpj: text('cnpj'),
+  endereco: text('endereco'),
   // Token do webhook de captação de site/landing page (formulário Lovable etc.) — por imobiliária.
   capturaToken: text('captura_token').unique(),
 
@@ -96,7 +118,10 @@ export const integracoesFacebook = pgTable('integracoes_facebook', {
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
   nomeConta: text('nome_conta').notNull(),
   pageId: text('page_id').notNull(),
-  formId: text('form_id').notNull(),
+  // null = todos os formulários da página (conexão feita pelo botão 'Conectar com Facebook').
+  formId: text('form_id'),
+  // 'manual' = token colado à mão (automação n8n varre o formulário) | 'oauth' = login com Facebook (webhook em tempo real).
+  origem: text('origem').notNull().default('manual'),
   tokenCifrado: text('token_cifrado').notNull(),
   tokenIv: text('token_iv').notNull(),
   tokenTag: text('token_tag').notNull(),
@@ -154,6 +179,8 @@ export const leads = pgTable('leads', {
   colunaId: uuid('coluna_id').references(() => colunasKanban.id, { onDelete: 'set null' }),
   corretorId: uuid('corretor_id').references(() => perfis.id, { onDelete: 'set null' }),
   campanha: text('campanha'),
+  // ID do lead no Facebook (leadgen_id) — evita duplicar quando a Meta reenvia o mesmo aviso.
+  fbLeadId: text('fb_lead_id'),
   segundoCadastro: boolean('segundo_cadastro').notNull().default(false),
   // Compra (venda) ou aluguel (locacao) — do formulário do site/facebook ou do número de WhatsApp.
   // Usado pra rotear o lead pra roleta certa.
@@ -166,6 +193,21 @@ export const leads = pgTable('leads', {
   motivoDescarte: text('motivo_descarte'),
   rendaDeclarada: numeric('renda_declarada', { precision: 14, scale: 2 }),
   entrouNaColunaEm: timestamp('entrou_na_coluna_em', { withTimezone: true }).notNull().defaultNow(),
+  // --- Agente de IA (SDR) ---
+  iaStatus: iaStatusEnum('ia_status'),
+  // Respostas que a IA já coletou, por chave de pergunta ({ finalidade: 'Comprar', bairro: 'Centro' }).
+  iaDados: jsonb('ia_dados').$type<Record<string, string>>().notNull().default({}),
+  iaResumo: text('ia_resumo'),
+  iaTurnos: integer('ia_turnos').notNull().default(0),
+  iaMsgsCliente: integer('ia_msgs_cliente').notNull().default(0),
+  iaUltimaAtividadeEm: timestamp('ia_ultima_atividade_em', { withTimezone: true }),
+  // Mensagem do cliente ainda sem resposta da IA (garante o turno mesmo se o servidor reiniciar).
+  iaAguardandoDesde: timestamp('ia_aguardando_desde', { withTimezone: true }),
+  // --- Importação por planilha ---
+  // Lote de onde o lead veio. Enquanto `importacaoPendente`, o lead fica guardado: fora do
+  // Kanban, da roleta automática e do "distribuir pendentes" — só o dono/gerente distribui.
+  loteImportacaoId: uuid('lote_importacao_id').references(() => lotesImportacao.id, { onDelete: 'set null' }),
+  importacaoPendente: boolean('importacao_pendente').notNull().default(false),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   // Postgres não indexa FK automaticamente — sem isso, toda listagem de leads (a query mais
@@ -174,6 +216,7 @@ export const leads = pgTable('leads', {
   imobiliariaIdx: index('leads_imobiliaria_id_idx').on(table.imobiliariaId),
   corretorIdx: index('leads_corretor_id_idx').on(table.corretorId),
   colunaIdx: index('leads_coluna_id_idx').on(table.colunaId),
+  fbLeadIdx: uniqueIndex('leads_imobiliaria_fb_lead_id_uq').on(table.imobiliariaId, table.fbLeadId),
 }));
 
 // Etiquetas coloridas por imobiliária (multi-tenant) — atribuídas a leads via lead_tags.
@@ -213,6 +256,12 @@ export const roletas = pgTable('roletas', {
   finalidade: roletaFinalidadeEnum('finalidade').notNull().default('ambos'),
   // Se setado, essa roleta só pega leads que entraram por ESSE número de WhatsApp.
   sessaoWhatsappId: uuid('sessao_whatsapp_id').references(() => sessoesWhatsapp.id, { onDelete: 'set null' }),
+  // Número central pelo qual o Agente de IA faz o PRIMEIRO CONTATO com leads de formulário
+  // (Facebook/Instagram/Site) que caem nesta roleta. Sem ele: o 1º número conectado em que a IA atende.
+  numeroPrimeiroContatoId: uuid('numero_primeiro_contato_id').references(() => sessoesWhatsapp.id, { onDelete: 'set null' }),
+  // Fila fixa (modo "avisar corretor por WhatsApp"): quem recebeu o último lead desta roleta.
+  // O próximo é quem vem depois dele na ordem (posição), dando a volta no fim da lista.
+  ultimoCorretorId: uuid('ultimo_corretor_id').references(() => perfis.id, { onDelete: 'set null' }),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   imobIdx: index('roletas_imobiliaria_id_idx').on(table.imobiliariaId),
@@ -244,9 +293,53 @@ export const sessoesWhatsapp = pgTable('sessoes_whatsapp', {
   numero: text('numero'),
   // Rótulo do número ("Vendas", "Locação", "Campanha Facebook") — só pra sessão central.
   rotulo: text('rotulo'),
+  // O Agente de IA atende neste número? (só vale pra número central; desligado = lead vai direto pra roleta)
+  iaAtende: boolean('ia_atende').notNull().default(true),
+  // API oficial (app Conecta Zap, Coexistência) no MESMO número — híbrido: com a janela de 24h
+  // aberta a resposta sai pela oficial; fora dela sai pelo WAHA; WAHA fora → modelo (template).
+  // O token é cifrado em repouso (lib/crypto). `status` acima continua sendo o do WAHA.
+  oficialPhoneNumberId: text('oficial_phone_number_id').unique(),
+  oficialWabaId: text('oficial_waba_id'),
+  oficialNumero: text('oficial_numero'),
+  oficialTokenCifrado: text('oficial_token_cifrado'),
+  oficialTokenIv: text('oficial_token_iv'),
+  oficialTokenTag: text('oficial_token_tag'),
+  oficialAtiva: boolean('oficial_ativa').notNull().default(false),
+  oficialErro: text('oficial_erro'),
+  // Modelo aprovado pra 1ª mensagem quando o WAHA está fora e a janela de 24h fechada ({{1}} = nome).
+  oficialTemplate: text('oficial_template'),
+  oficialTemplateIdioma: text('oficial_template_idioma'),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   imobiliariaIdx: index('sessoes_whatsapp_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
+
+/** Número desconhecido que falou com o WhatsApp de um corretor (modo 'corretor'). Não vira lead
+ *  sozinho: fica aqui até o corretor escolher "trazer pro CRM" ou "é pessoal". Só o próprio
+ *  corretor vê, e nenhum conteúdo de mensagem é guardado — só quem é e quando falou. */
+export const contatosPendentes = pgTable('contatos_pendentes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  corretorId: uuid('corretor_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  sessaoWhatsappId: uuid('sessao_whatsapp_id').notNull().references(() => sessoesWhatsapp.id, { onDelete: 'cascade' }),
+  telefone: text('telefone').notNull(),
+  nome: text('nome'),
+  qtdMensagens: integer('qtd_mensagens').notNull().default(1),
+  ultimaMensagemEm: timestamp('ultima_mensagem_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  corretorTelefoneIdx: uniqueIndex('contatos_pendentes_corretor_telefone_idx').on(table.corretorId, table.telefone),
+}));
+
+/** Números que o corretor marcou como "pessoal": o espelhamento ignora pra sempre (nem pendente vira). */
+export const contatosIgnorados = pgTable('contatos_ignorados', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  corretorId: uuid('corretor_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  telefone: text('telefone').notNull(),
+  nome: text('nome'),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  corretorTelefoneIdx: uniqueIndex('contatos_ignorados_corretor_telefone_idx').on(table.corretorId, table.telefone),
 }));
 
 export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
@@ -255,6 +348,9 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   direcao: direcaoEnum('direcao').notNull(),
   // id da mensagem no WhatsApp (WAHA) — evita duplicar ao processar o webhook 2x.
   waMessageId: text('wa_message_id'),
+  // ID interno da mensagem no WhatsApp (o mesmo no WAHA e dentro do wamid da API oficial). No
+  // número híbrido a mesma mensagem chega pelos dois lados — esta chave faz só uma entrar.
+  waChave: text('wa_chave'),
   // "visto" do WhatsApp (evento message.ack): 1=enviando, 2=no servidor, 3=entregue, 4=lido, 5=reproduzido.
   ackStatus: integer('ack_status'),
   // Mensagem recebida já foi vista por alguém do CRM? (pro contador de não lidas em Conversas)
@@ -268,12 +364,15 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   anexoTipo: text('anexo_tipo'), // 'imagem' | 'video' | 'audio' | 'documento'
   // Nome original do arquivo (importante pra PDF — o lead manda "Contrato.pdf" e tem que baixar com esse nome).
   anexoNome: text('anexo_nome'),
+  // Áudio do cliente transcrito (feito quando o Agente de IA está atendendo) — a IA lê e o corretor também.
+  transcricao: text('transcricao'),
   canal: mensagemCanalEnum('canal').notNull().default('corretor'),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   leadIdx: index('mensagens_lead_id_idx').on(table.leadId),
   // Trava de duplicidade: o webhook do WAHA pode chegar 2x (retry, múltiplos eventos).
   waMsgIdx: uniqueIndex('mensagens_wa_message_id_uq').on(table.waMessageId).where(sql`${table.waMessageId} is not null`),
+  waChaveIdx: uniqueIndex('mensagens_wa_chave_uq').on(table.leadId, table.waChave).where(sql`${table.waChave} is not null`),
 }));
 
 /** Tarefa / compromisso ligado (ou não) a um lead — pra Agenda e pros lembretes. */
@@ -299,6 +398,75 @@ export const tarefas = pgTable('tarefas', {
 
 /** Linha do tempo de um lead — um registro por evento (criado, mudou de coluna, distribuído,
  *  mensagem, tarefa, nota manual, descarte). O nome do ator é gravado como snapshot. */
+export type PerguntaIa = { chave: string; rotulo: string; pergunta: string; obrigatoria: boolean; opcoes?: string[] };
+/** Etiqueta que a IA pode aplicar, e quando. */
+export type EtiquetaIa = { tagId: string; quando: string };
+/** Critério de desqualificação: 'descartar' = vai pro bolsão sem passar pela roleta;
+ *  'seguir' = só aplica a etiqueta (se tiver) e segue o fluxo normal. */
+export type CriterioIa = {
+  chave: string; descricao: string; acao: 'descartar' | 'seguir'; tagId?: string | null;
+  // "Antes de descartar, tentar": a IA faz essa tentativa de salvar o lead UMA vez (ex.: compor renda).
+  tentativa?: string | null;
+};
+
+/** Configuração do Agente de IA (SDR) de cada imobiliária. Campos em vez de prompt livre:
+ *  quem monta o prompt é o workflow n8n, a partir daqui. */
+export const agentesIa = pgTable('agentes_ia', {
+  imobiliariaId: uuid('imobiliaria_id').primaryKey().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  ativo: boolean('ativo').notNull().default(false),
+  nomeAgente: text('nome_agente').notNull().default('Ana'),
+  tom: text('tom').notNull().default('cordial'),
+  apresentacao: text('apresentacao').notNull().default(''),
+  instrucoesExtras: text('instrucoes_extras').notNull().default(''),
+  perguntas: jsonb('perguntas').$type<PerguntaIa[]>().notNull().default([]),
+  etiquetas: jsonb('etiquetas').$type<EtiquetaIa[]>().notNull().default([]),
+  criterios: jsonb('criterios').$type<CriterioIa[]>().notNull().default([]),
+  mensagemPassagem: text('mensagem_passagem').notNull().default('Perfeito! Vou passar suas informações para um dos nossos corretores.'),
+  maxMensagens: integer('max_mensagens').notNull().default(12),
+  atenderWhatsapp: boolean('atender_whatsapp').notNull().default(true),
+  // Canais de formulário em que a IA faz o PRIMEIRO contato ('Facebook' | 'Instagram' | 'Site').
+  primeiroContatoCanais: jsonb('primeiro_contato_canais').$type<string[]>().notNull().default([]),
+  minutosSemResposta: integer('minutos_sem_resposta').notNull().default(20),
+  minutosAbandono: integer('minutos_abandono').notNull().default(120),
+  // Jeito humano: segundos de silêncio do cliente antes de responder (junta mensagens picadas),
+  // e marcar como lido + "digitando…" proporcional ao tamanho da resposta.
+  esperaSegundos: integer('espera_segundos').notNull().default(8),
+  // Catálogo: a IA sugere imóveis do cadastro que combinam e manda as fotos quando o cliente quer ver.
+  consultarImoveis: boolean('consultar_imoveis').notNull().default(true),
+  informarPreco: boolean('informar_preco').notNull().default(true),
+  fotosPorImovel: integer('fotos_por_imovel').notNull().default(3),
+  // Despedida de quem foi desqualificado: 'ia' = a IA explica com educação que no momento não se
+  // encaixa; 'fixa' = manda mensagemDesqualificado, sem citar motivo nenhum.
+  despedidaModo: text('despedida_modo').notNull().default('ia'),
+  mensagemDesqualificado: text('mensagem_desqualificado').notNull().default('Obrigada pelas informações! Registrei tudo aqui e, se surgir uma opção que combine com o que você procura, nossa equipe entra em contato. 😊'),
+  simularDigitacao: boolean('simular_digitacao').notNull().default(true),
+  // Chave OpenAI própria da imobiliária (AES-256-GCM, mesmo esquema do token do Facebook).
+  chaveCifrada: text('chave_cifrada'),
+  chaveIv: text('chave_iv'),
+  chaveTag: text('chave_tag'),
+  modelo: text('modelo').notNull().default('gpt-4.1-mini'),
+  atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Log de cada rodada da IA — pra mostrar à imobiliária o que ela entendeu e por que passou. */
+export const iaTurnos = pgTable('ia_turnos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'set null' }),
+  leadNome: text('lead_nome').notNull(),
+  entrada: text('entrada'),
+  resposta: text('resposta'),
+  campos: jsonb('campos').$type<Record<string, string>>().notNull().default({}),
+  decisao: text('decisao').notNull(),
+  erro: text('erro'),
+  // Consumo da chamada à OpenAI (pra cobrança quando a chave é do SaaS).
+  tokens: integer('tokens').notNull().default(0),
+  chaveSaas: boolean('chave_saas').notNull().default(true),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobiliariaIdx: index('ia_turnos_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
+
 export const eventosLead = pgTable('eventos_lead', {
   id: uuid('id').primaryKey().defaultRandom(),
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
@@ -309,6 +477,24 @@ export const eventosLead = pgTable('eventos_lead', {
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   leadIdx: index('eventos_lead_lead_id_idx').on(table.leadId),
+}));
+
+/** Resultado de cada tentativa de aviso ao corretor por WhatsApp (via n8n) — reportado pelo
+ *  próprio n8n depois de tentar mandar (sucesso ou erro), não pelo CRM na hora de disparar
+ *  (o CRM só empurra pro webhook, quem sabe se mandou de verdade é quem chama o WAHA).
+ *  Nome de lead/corretor gravados como snapshot (sobrevivem se o registro original sumir). */
+export const avisosCorretorWhatsapp = pgTable('avisos_corretor_whatsapp', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'set null' }),
+  leadNome: text('lead_nome').notNull(),
+  corretorId: uuid('corretor_id').references(() => perfis.id, { onDelete: 'set null' }),
+  corretorNome: text('corretor_nome').notNull(),
+  sucesso: boolean('sucesso').notNull(),
+  erro: text('erro'),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobiliariaIdx: index('avisos_corretor_whatsapp_imobiliaria_id_idx').on(table.imobiliariaId),
 }));
 
 /** Régua de follow-up que um corretor monta. Cada corretor tem quantas quiser; no máximo uma
@@ -402,6 +588,9 @@ export const imoveis = pgTable('imoveis', {
   videoUrl: text('video_url'),
   // Aparece no site público da imobiliária?
   publicarNoSite: boolean('publicar_no_site').notNull().default(true),
+  // Nomes com que o imóvel aparece no nome das campanhas de anúncio (ex.: "CENARIUM" em
+  // "[NC 02][CENARIUM][FORM]"): o lead que chega dessa campanha já vem ligado a este imóvel.
+  nomesCampanha: jsonb('nomes_campanha').$type<string[]>().notNull().default([]),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -458,6 +647,39 @@ export const notificacoes = pgTable('notificacoes', {
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Cada vez que um corretor recusa um lead no popup do CRM (ou deixa o tempo acabar).
+ *  Alimenta o Histórico da Roleta e as métricas de aceite em Relatórios. */
+export const recusasLead = pgTable('recusas_lead', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  leadId: uuid('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  corretorId: uuid('corretor_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  // 'recusou' = clicou em Recusar; 'sem_resposta' = o tempo do popup acabou
+  motivo: text('motivo').notNull(),
+  // pra quem a roleta mandou depois (null = ninguém disponível, ficou sem corretor)
+  redistribuidoParaId: uuid('redistribuido_para_id').references(() => perfis.id, { onDelete: 'set null' }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('recusas_lead_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
+
+/** Lote de leads importados de uma planilha (Excel/CSV). Os leads ficam guardados até o
+ *  dono/gerente distribuir pelo lote — nada sai pra roleta, IA ou follow-up sozinho. */
+export const lotesImportacao = pgTable('lotes_importacao', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  nome: text('nome').notNull(),
+  criadoPorNome: text('criado_por_nome'),
+  // etiqueta aplicada em todos os leads do lote ("Planilha: <nome>")
+  tagId: uuid('tag_id').references(() => tags.id, { onDelete: 'set null' }),
+  novos: integer('novos').notNull().default(0),
+  duplicados: integer('duplicados').notNull().default(0),
+  invalidos: integer('invalidos').notNull().default(0),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('lotes_importacao_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
+
 export const distribuicaoLog = pgTable('distribuicao_log', {
   id: uuid('id').primaryKey().defaultRandom(),
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
@@ -495,4 +717,30 @@ export const leadsRelations = relations(leads, ({ one, many }) => ({
 
 export const mensagensRelations = relations(mensagensWhatsapp, ({ one }) => ({
   lead: one(leads, { fields: [mensagensWhatsapp.leadId], references: [leads.id] }),
+}));
+
+/** Uma conversa com o assistente de voz: conta os segundos usados (cota mensal da imobiliária). */
+export const assistenteSessoes = pgTable('assistente_sessoes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  perfilId: uuid('perfil_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  iniciadaEm: timestamp('iniciada_em', { withTimezone: true }).notNull().defaultNow(),
+  ultimoSinalEm: timestamp('ultimo_sinal_em', { withTimezone: true }).notNull().defaultNow(),
+  segundos: integer('segundos').notNull().default(0),
+  encerrada: boolean('encerrada').notNull().default(false),
+  // O que foi dito (pra ele lembrar da conversa da próxima vez e mostrar o histórico na tela).
+  transcricao: jsonb('transcricao').$type<{ quem: string; texto: string }[]>().notNull().default([]),
+}, table => ({
+  imobIdx: index('assistente_sessoes_imob_idx').on(table.imobiliariaId, table.iniciadaEm),
+}));
+
+/** O que o usuário pediu pro assistente lembrar ("o João só visita sábado"). Cada um vê só as suas. */
+export const assistenteMemorias = pgTable('assistente_memorias', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  perfilId: uuid('perfil_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  texto: text('texto').notNull(),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  perfilIdx: index('assistente_memorias_perfil_idx').on(table.perfilId),
 }));

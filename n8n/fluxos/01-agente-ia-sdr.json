@@ -1,0 +1,265 @@
+{
+  "name": "CRM HINODE — AGENTE DE IA (SDR)",
+  "nodes": [
+    {
+      "id": "nota-vc8ryirr",
+      "name": "Leia-me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -320
+      ],
+      "parameters": {
+        "content": "## Agente de IA (SDR)\nChamado pelo backend do CRM a cada rodada da conversa (lib/agenteIa.ts). Recebe config da imobiliária + histórico, monta o prompt, chama a OpenAI com saída JSON estrita e DEVOLVE o JSON na mesma requisição.\n\nNão manda WhatsApp nem decide roleta: quem faz isso é o CRM.\n\nTrocar __SEGREDO_AGENTE_IA__ pelo mesmo valor de N8N_AGENTE_IA_SECRET do backend. Credencial: \"OpenAI (chave do SaaS)\".",
+        "width": 620,
+        "height": 260,
+        "color": 4
+      }
+    },
+    {
+      "id": "a1",
+      "name": "Receber Turno do CRM",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hinode-agente-ia",
+        "responseMode": "responseNode",
+        "options": {
+          "onlyRunIf": "={{ $json.headers[\"x-agente-secret\"] === \"__SEGREDO_AGENTE_IA__\" }}"
+        }
+      }
+    },
+    {
+      "id": "a2",
+      "name": "Montar Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const b = $input.first().json.body || {};\nconst a = b.agente || {};\nconst tons = { cordial: 'cordial e acolhedor', formal: 'formal e profissional', descontraido: 'leve e descontraído' };\nconst perguntas = b.perguntas || [];\nconst etiquetas = b.etiquetas || [];\nconst criterios = b.criterios || [];\nconst dados = b.dados || {};\nconst lead = b.lead || {};\nconst imoveis = b.imoveis || [];\nconst hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })) % 24;\n// madrugada (0h-4h) ainda é \"boa noite\"\nconst periodo = hora < 5 ? 'boa noite' : hora < 12 ? 'bom dia' : hora < 18 ? 'boa tarde' : 'boa noite';\nconst jaFalou = (b.historico || []).some(m => m.papel === 'atendente');\n\n// Pergunta já respondida (pelo cliente, pelo formulário ou pelo imóvel que ele escolheu) aparece marcada, pra IA não perguntar de novo.\nconst linhasP = perguntas.map(p => dados[p.chave]\n  ? '- ' + p.chave + ': JÁ RESPONDIDO → \"' + dados[p.chave] + '\" (NÃO pergunte isso)'\n  : '- ' + p.chave + ': ' + p.pergunta + (p.opcoes && p.opcoes.length ? ' (opções: ' + p.opcoes.join(', ') + ')' : '') + (p.obrigatoria ? ' [OBRIGATÓRIA]' : ' [desejável]')).join('\\n');\nconst conhecidos = Object.entries(dados).map(([k, v]) => '- ' + k + ': ' + v).join('\\n') || '(nada ainda)';\n\nconst despedidaDesq = a.despedidaExplica === false\n  ? 'Ao desqualificar: deixe \"textoDesqualificacao\" vazio (a imobiliária manda a despedida dela) e marque encerrar = true.'\n  : 'Ao desqualificar: escreva no campo \"textoDesqualificacao\" a despedida: agradeça o contato e explique com educação, honestidade e empatia que, pelo que a pessoa contou, no momento a imobiliária não tem uma opção que se encaixe. Pode dizer o motivo de forma gentil e sem julgamento (ex.: \"para financiamento os bancos costumam pedir uma renda maior\"). Diga que a equipe avisa se surgir algo que combine. Sem perguntas. Marque encerrar = true.';\nconst linhaCrit = c => '- ' + c.chave + ': ' + c.descricao + (c.tentativa ? (c.tentativaFeita ? ' [a tentativa de salvar JÁ FOI FEITA: \"' + c.tentativa + '\"]' : ' [ANTES de desqualificar, tente: ' + c.tentativa + ']') : '');\nconst criteriosResgate = criterios.filter(c => c.tentativa && !c.tentativaFeita);\n\nconst reais = v => 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });\nconst linhaImovel = i => '- ' + i.codigo + ': ' + i.titulo + ' | ' + i.finalidade + ' | ' + (i.local || 'local não informado')\n  + ' | ' + (i.preco ? reais(i.preco) + (/alug/i.test(i.finalidade) ? '/mês' : '') : 'preço: o corretor informa')\n  + ' | ' + [i.quartos ? i.quartos + ' quartos' + (i.suites ? ' (' + i.suites + ' suíte)' : '') : '', i.vagas ? i.vagas + ' vaga(s)' : '', i.area ? i.area + ' m²' : ''].filter(Boolean).join(', ')\n  + (i.destaques && i.destaques.length ? ' | ' + i.destaques.join(', ') : '') + ' | ' + i.situacao + (i.aceitaFinanciamento ? ' | aceita financiamento' : '')\n  + (i.condominio ? ' | condomínio ' + reais(i.condominio) : '') + (i.iptu ? ' | IPTU ' + reais(i.iptu) : '')\n  + (i.foraDoBairroPedido ? ' | FORA DO BAIRRO QUE O CLIENTE PEDIU' : '') + ' | ' + i.qtdFotos + ' foto(s)';\nlet blocoCatalogo = '';\nif (a.consultaImoveis) {\n  blocoCatalogo = imoveis.length\n    ? 'IMÓVEIS DO NOSSO CADASTRO QUE COMBINAM COM O CLIENTE (fale SÓ destes; nunca invente outro imóvel):\\n' + imoveis.map(linhaImovel).join('\\n')\n      + '\\n- Esta lista mostra só o que combina com o que o cliente pediu até agora (tipo, compra/aluguel, valor). NÃO afirme que a imobiliária \"não tem\" ou \"só tem\" imóvel em algum bairro, cidade ou tipo: se o cliente perguntar por algo fora da lista, diga que vai pedir pro corretor verificar as opções.'\n      + '\\n- ASSIM QUE souber o que o cliente procura (compra/aluguel + tipo ou região), sugira JÁ NESTA RESPOSTA 1 (no máximo 2) desses imóveis de forma natural (nome curto + 1 ou 2 destaques' + (a.informarPreco ? ' + preço' : '') + ') e pergunte se ele quer ver as fotos. Deixe a próxima pergunta de qualificação pra depois que ele responder. Sugerir imóvel não substitui as perguntas obrigatórias.'\n      + '\\n- Se o cliente pedir fotos ou topar ver, coloque o código em \"enviarFotos\" (ex.: \"IM1\"). Nesse caso escreva a resposta em 2 balões: o 1º só \"Te mando as fotos aqui 👇\" e o 2º (se quiser) a próxima pergunta; o sistema envia as fotos entre os dois. Nunca mande link. Só use enviarFotos se o imóvel tiver foto.'\n      + '\\n- Se o cliente demonstrar interesse num imóvel, coloque o código em \"imovelInteresse\".'\n      + '\\n- Não repita a sugestão de um imóvel já apresentado, a não ser que o cliente pergunte.'\n      + '\\n- Condomínio e IPTU: se aparecem na linha do imóvel, informe. Se perguntarem algo que NÃO está na linha dele (andar, se aceita pet, IPTU ou condomínio que não aparecem, visita), diga que o corretor confirma.'\n      + '\\n- \"aceita financiamento\" NÃO quer dizer que aceita FGTS: nunca afirme FGTS, permuta, desconto ou outra condição que não esteja escrita na linha do imóvel; diga que o corretor confirma.'\n      + '\\n- Imóvel marcado \"FORA DO BAIRRO QUE O CLIENTE PEDIU\": deixe claro que fica em outro bairro (ex.: \"no Umarizal não tenho agora, mas tenho um no Marco...\") e nunca apresente como se fosse do bairro pedido.'\n      + (a.informarPreco ? '' : '\\n- NÃO informe preço: diga que os valores o corretor passa.')\n    : 'CATÁLOGO: nenhum imóvel do cadastro combina com o filtro atual da conversa. Não sugira imóvel e NÃO diga que a imobiliária não tem: diga que o corretor vai separar as opções pra ele.';\n}\n\nconst partes = [\n  'Você é ' + (a.nome || 'Ana') + ', atendente da imobiliária ' + (b.imobiliariaNome || '') + ', conversando pelo WhatsApp. Tom: ' + (tons[a.tom] || 'cordial') + '.',\n  a.apresentacao ? 'Sobre a imobiliária: ' + a.apresentacao : '',\n  'SEU PAPEL: fazer o primeiro atendimento e descobrir as informações abaixo de forma natural, no máximo uma ou duas perguntas por mensagem. Depois disso um corretor humano assume a conversa.',\n  b.evento !== 'primeiro_contato' && !jaFalou\n    ? 'PRIMEIRA RESPOSTA DA CONVERSA: comece se apresentando, algo como \"Oi, ' + periodo + '! Aqui é a ' + (a.nome || 'Ana') + ', da ' + (b.imobiliariaNome || '') + ' 😊\", e na mesma mensagem já responda ao que o cliente disse (se ele só cumprimentou, pergunte de forma leve o que ele procura). Na apresentação NÃO diga que é assistente virtual, robô ou IA.'\n    : 'Você já se apresentou: não se apresente de novo e não repita cumprimento.',\n  'INFORMAÇÕES A DESCOBRIR:\\n' + linhasP,\n  '- NUNCA pergunte nada marcado como JÁ RESPONDIDO, nem o que o imóvel de interesse do cliente já responde (compra/aluguel, tipo, bairro, valor). No máximo confirme de passagem, sem ponto de interrogação. Pergunte só o que falta.',\n  'O QUE JÁ SABEMOS:\\n' + conhecidos,\n  lead.imovel ? 'IMÓVEL QUE O CLIENTE ESCOLHEU (no anúncio ou no site): ' + lead.imovel + '.' : '',\n  lead.regiaoTelefone ? 'PISTA: o telefone do cliente é ' + lead.regiaoTelefone + '. É só uma pista (a pessoa pode estar se mudando ou morar em outro lugar): pode usar com naturalidade, por exemplo pra confirmar se procura na região, mas nunca afirme onde ela mora e nunca preencha a região só por causa do DDD.' : '',\n  '- Mensagens do cliente que começam com \"[áudio]:\" foram transcritas de um áudio: responda normalmente, como se tivesse ouvido. Se a transcrição não fizer sentido, peça com gentileza pra repetir por texto.',\n  blocoCatalogo,\n  'JEITO DE ESCREVER:',\n  '- Escreva como uma pessoa de verdade no WhatsApp: natural, simpática, frases curtas. Nada de texto de robô (\"Como posso ajudar?\", \"Como posso ajudá-lo hoje?\", \"Fico à disposição\", \"Em que posso ser útil?\"), sem listas, sem markdown, no máximo um emoji.',\n  '- Reaja ao que o cliente disse antes de perguntar a próxima coisa (ex.: \"Umarizal é ótimo!\"). Não repita o nome do cliente em toda mensagem.',\n  '- Se o cliente mandou várias mensagens seguidas, responda tudo de uma vez, de forma coerente.',\n  '- Se o cliente desviar ou não responder uma pergunta sua, responda o que ELE perguntou e NÃO repita a mesma pergunta na mensagem seguinte; retome mais pra frente, com outras palavras.',\n  '- Quando ficar natural, divida a resposta em até 2 balões separados por UMA LINHA EM BRANCO (ex.: uma reação curta e, no outro balão, a pergunta). Não faça isso em toda mensagem.',\n  'REGRAS:',\n  '- Nunca invente preço, disponibilidade, endereço, condição de pagamento ou prazo (os únicos dados de imóvel que você pode citar são os da lista do cadastro acima). Se perguntarem algo que você não sabe, diga que o corretor vai confirmar.',\n  '- Nunca fale de distância ou proximidade entre bairros e cidades (\"fica pertinho\", \"é perto de\"): você não sabe isso.',\n  '- Não marque visita e não prometa nada.',\n  '- Se o cliente quer ALUGAR, não fale de financiamento, FGTS, consórcio nem entrada: isso é de compra.',\n  '- Não repita pergunta que já foi respondida.',\n  '- Informações [desejável]: pergunte se a conversa permitir, mas não insista se o cliente não quiser responder.',\n  '- Quando já tiver todas as [OBRIGATÓRIA]: faça no máximo UMA mensagem com as [desejável] que ainda faltam (no máximo 2 juntas) e, na resposta seguinte, ENCERRE. Se o cliente der sinal de que terminou (\"era isso\", \"obrigado\", \"depois eu vejo\") ou não quiser responder as desejáveis, ENCERRE na hora, sem fazer mais perguntas. Não fique puxando assunto depois disso.',\n  '- ENCERRAR = agradecer e dizer que vai encaminhar para um corretor, algo como: \"' + (a.mensagemPassagem || '') + '\". NÃO diga quando nem quem vai atender (o sistema avisa isso logo em seguida). Marque encerrar = true. Se sua mensagem ainda faz uma pergunta ao cliente, encerrar = false.',\n  '- Só se o cliente PERGUNTAR diretamente se você é robô ou IA: responda com honestidade que é uma assistente virtual da imobiliária e que um corretor vai continuar o atendimento.',\n  '- Se o cliente pedir para falar com uma pessoa ou corretor, marque pediuHumano = true e diga que vai chamar um corretor (sem dizer quando).',\n  '- Se o cliente disser claramente que não tem interesse, marque semInteresse = true e se despeça com educação.',\n  a.instrucoesExtras ? 'INSTRUÇÕES DA IMOBILIÁRIA:\\n' + a.instrucoesExtras : '',\n  etiquetas.length ? 'ETIQUETAS (coloque o id em \"etiquetas\" só quando a situação acontecer):\\n' + etiquetas.map(e => '- ' + e.id + ' (' + e.nome + '): ' + e.quando).join('\\n') : '',\n  criterios.length ? 'DESQUALIFICAÇÃO (preencha \"desqualificacao\" com a chave só se a conversa mostrar CLARAMENTE o caso; na dúvida, null):\\n' + criterios.map(linhaCrit).join('\\n') + '\\n- Se o critério tiver \"ANTES de desqualificar, tente\": NÃO desqualifique ainda. Agradeça o que o cliente contou e faça essa tentativa de forma gentil (desqualificacao = null, tentativaResgate = chave do critério, encerrar = false).\\n- Se o cliente apresentar QUALQUER alternativa viável (FGTS, entrada, compor renda, pagamento à vista, fiador, consórcio), NÃO desqualifique: siga e encaminhe para o corretor, que avalia o caso.\\n- Só desqualifique se não houver tentativa, ou se ela JÁ FOI FEITA e o cliente confirmou que não tem nenhuma alternativa.\\n- NUNCA marque desqualificacao e diga que vai encaminhar para um corretor na mesma resposta: ou encaminha, ou desqualifica.\\n' + despedidaDesq : '',\n  'Em \"campos\", devolva o que o cliente informou em toda a conversa (quando houver opções, use exatamente uma delas); o que ainda não souber, null. Preencha cada campo SÓ com o que o cliente disse com as próprias palavras: nunca deduza nem escolha uma opção que ele não falou (ex.: \"pago todo mês\" NÃO é financiamento); na dúvida, null. Se ele citar mais de um bairro ou região, registre todos (ex.: \"Umarizal ou Nazaré\"). Se ele for compor renda com outra pessoa, some as rendas no campo de renda e cite isso (ex.: \"3000 somando com a esposa\").',\n  'Se não for desqualificar, deixe \"textoDesqualificacao\" vazio.',\n];\nif (b.evento === 'primeiro_contato') {\n  partes.push('ESTA É A PRIMEIRA MENSAGEM: o cliente ' + (lead.nome || '') + ' preencheu um formulário (canal ' + (lead.canal || '') + ') e ainda não conversou com a gente. Cumprimente pelo primeiro nome com \"' + periodo + '\", apresente-se como ' + (a.nome || 'Ana') + ' da ' + (b.imobiliariaNome || '') + ' (sem dizer que é IA). '\n    + (lead.imovel\n      ? 'Ele escolheu o imóvel \"' + lead.imovel + '\": mencione esse imóvel com 1 destaque e OFEREÇA mandar as fotos (se ele estiver na lista do cadastro com foto). NÃO pergunte compra/aluguel, tipo, bairro nem valor: isso o imóvel já responde.'\n      : 'Faça a primeira pergunta do que ainda falta.')\n    + ' Nunca cite código ou nome interno de campanha.');\n}\nconst system = partes.filter(Boolean).join('\\n\\n');\n\nconst messages = [{ role: 'system', content: system }];\nfor (const m of (b.historico || [])) {\n  messages.push({ role: m.papel === 'cliente' ? 'user' : 'assistant', content: String(m.texto || '') });\n}\n\nconst campoProps = {};\nfor (const p of perguntas) {\n  campoProps[p.chave] = p.opcoes && p.opcoes.length ? { type: ['string', 'null'], enum: [...p.opcoes, null] } : { type: ['string', 'null'] };\n}\nconst codigos = imoveis.map(i => i.codigo);\nconst comFoto = imoveis.filter(i => i.qtdFotos > 0).map(i => i.codigo);\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['resposta', 'campos', 'encerrar', 'pediuHumano', 'semInteresse', 'etiquetas', 'desqualificacao', 'tentativaResgate', 'textoDesqualificacao', 'enviarFotos', 'imovelInteresse'],\n  properties: {\n    resposta: { type: 'string' },\n    campos: { type: 'object', additionalProperties: false, required: Object.keys(campoProps), properties: campoProps },\n    encerrar: { type: 'boolean' },\n    pediuHumano: { type: 'boolean' },\n    semInteresse: { type: 'boolean' },\n    etiquetas: { type: 'array', items: etiquetas.length ? { type: 'string', enum: etiquetas.map(e => e.id) } : { type: 'string' } },\n    desqualificacao: criterios.length ? { type: ['string', 'null'], enum: [...criterios.map(c => c.chave), null] } : { type: 'null' },\n    tentativaResgate: criteriosResgate.length ? { type: ['string', 'null'], enum: [...criteriosResgate.map(c => c.chave), null] } : { type: 'null' },\n    textoDesqualificacao: { type: 'string' },\n    enviarFotos: comFoto.length ? { type: ['string', 'null'], enum: [...comFoto, null] } : { type: 'null' },\n    imovelInteresse: codigos.length ? { type: ['string', 'null'], enum: [...codigos, null] } : { type: 'null' },\n  },\n};\n\nreturn [{ json: {\n  openaiKey: b.openaiKey || '',\n  requestBody: {\n    model: a.modelo || 'gpt-4.1-mini',\n    temperature: 0.6,\n    messages,\n    response_format: { type: 'json_schema', json_schema: { name: 'resposta_sdr', strict: true, schema } },\n  },\n} }];"
+      }
+    },
+    {
+      "id": "a3",
+      "name": "Chave Própria?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.openaiKey }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a4",
+      "name": "OpenAI (Chave da Imobiliária)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.openaiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}",
+        "options": {
+          "timeout": 50000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a5",
+      "name": "OpenAI (Chave do SaaS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}",
+        "options": {
+          "timeout": 50000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI (chave do SaaS)"
+        }
+      }
+    },
+    {
+      "id": "a6",
+      "name": "Interpretar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const r = $input.first().json || {};\nif (r.error || !r.choices) {\n  return [{ json: { ok: false, erro: 'OpenAI: ' + ((r.error && r.error.message) || JSON.stringify(r).slice(0, 300)) } }];\n}\nlet saida;\ntry {\n  saida = JSON.parse(r.choices[0].message.content);\n} catch (e) {\n  return [{ json: { ok: false, erro: 'Resposta da IA não veio em JSON' } }];\n}\nconst campos = {};\nfor (const [k, v] of Object.entries(saida.campos || {})) {\n  if (typeof v === 'string' && v.trim()) campos[k] = v.trim();\n}\nreturn [{ json: {\n  ok: true,\n  resposta: String(saida.resposta || '').trim(),\n  campos,\n  encerrar: !!saida.encerrar,\n  pediuHumano: !!saida.pediuHumano,\n  semInteresse: !!saida.semInteresse,\n  etiquetas: Array.isArray(saida.etiquetas) ? saida.etiquetas : [],\n  desqualificacao: saida.desqualificacao || null,\n  tentativaResgate: saida.tentativaResgate || null,\n  textoDesqualificacao: String(saida.textoDesqualificacao || '').trim(),\n  enviarFotos: saida.enviarFotos || null,\n  imovelInteresse: saida.imovelInteresse || null,\n  tokens: (r.usage && r.usage.total_tokens) || 0,\n} }];"
+      }
+    },
+    {
+      "id": "a7",
+      "name": "Devolver ao CRM",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Receber Turno do CRM": {
+      "main": [
+        [
+          {
+            "node": "Montar Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Prompt": {
+      "main": [
+        [
+          {
+            "node": "Chave Própria?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chave Própria?": {
+      "main": [
+        [
+          {
+            "node": "OpenAI (Chave da Imobiliária)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OpenAI (Chave do SaaS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI (Chave da Imobiliária)": {
+      "main": [
+        [
+          {
+            "node": "Interpretar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI (Chave do SaaS)": {
+      "main": [
+        [
+          {
+            "node": "Interpretar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar Resposta": {
+      "main": [
+        [
+          {
+            "node": "Devolver ao CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

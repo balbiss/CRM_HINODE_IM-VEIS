@@ -92,6 +92,7 @@ export function sitesRouter(io: SocketServer) {
       email: z.string().email().max(160).optional().or(z.literal('')),
       mensagem: z.string().max(1200).optional(),
       imovel: z.string().max(200).optional(),
+      imovelId: z.string().uuid().optional(),
       interesse: z.string().max(40).optional(),
     }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Preencha nome e telefone.' });
@@ -102,7 +103,8 @@ export function sitesRouter(io: SocketServer) {
     await criarLead(io, site.imobiliariaId, {
       nome: parsed.data.nome, telefone: parsed.data.telefone,
       email: parsed.data.email || undefined, mensagem: parsed.data.mensagem,
-      imovelTitulo: parsed.data.imovel, campanha: 'Site', canal: 'Site',
+      // imovelId: o criarLead confere que o imóvel é desta imobiliária e puxa título/valor/finalidade dele
+      imovelTitulo: parsed.data.imovel, imovelId: parsed.data.imovelId, campanha: 'Site', canal: 'Site',
       finalidade: normalizarFinalidade(parsed.data.interesse),
     });
     res.status(201).json({ ok: true });

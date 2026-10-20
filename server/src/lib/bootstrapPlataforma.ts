@@ -3,23 +3,29 @@ import { eq, and, sql, isNotNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminsPlataforma, imobiliarias } from '../db/schema.js';
 
-/** Cria o 1º admin da plataforma a partir de PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD
- *  se a tabela estiver vazia. Idempotente. */
+/** Garante o admin da plataforma de PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD a cada inicialização:
+ *  cria se ainda não existe e, se já existe com outra senha, atualiza pra senha da variável. Assim
+ *  trocar as variáveis no servidor (e reiniciar) é o jeito de definir/recuperar esse acesso.
+ *  Outros admins já cadastrados não são mexidos. */
 export async function bootstrapAdminPlataforma() {
-  const email = process.env.PLATFORM_ADMIN_EMAIL?.toLowerCase();
+  const email = process.env.PLATFORM_ADMIN_EMAIL?.trim().toLowerCase();
   const senha = process.env.PLATFORM_ADMIN_PASSWORD;
   if (!email || !senha) return;
 
-  const [existe] = await db.select({ id: adminsPlataforma.id }).from(adminsPlataforma).limit(1);
-  if (existe) return;
-
-  const senhaHash = await bcrypt.hash(senha, 10);
-  await db.insert(adminsPlataforma).values({
-    nome: process.env.PLATFORM_ADMIN_NAME || 'Administrador',
-    email,
-    senhaHash,
-  });
-  console.log('Plataforma: admin inicial criado —', email);
+  const [atual] = await db.select().from(adminsPlataforma).where(eq(adminsPlataforma.email, email)).limit(1);
+  if (!atual) {
+    await db.insert(adminsPlataforma).values({
+      nome: process.env.PLATFORM_ADMIN_NAME || 'Administrador',
+      email,
+      senhaHash: await bcrypt.hash(senha, 10),
+    });
+    console.log('Plataforma: admin criado —', email);
+    return;
+  }
+  if (!(await bcrypt.compare(senha, atual.senhaHash))) {
+    await db.update(adminsPlataforma).set({ senhaHash: await bcrypt.hash(senha, 10) }).where(eq(adminsPlataforma.id, atual.id));
+    console.log('Plataforma: senha do admin atualizada pela variável —', email);
+  }
 }
 
 /** Bloqueia automaticamente imobiliárias ativas cujo vencimento passou + a carência delas,

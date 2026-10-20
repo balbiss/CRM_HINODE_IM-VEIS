@@ -294,3 +294,34 @@ existe). Zero risco, zero efeito no resto do app — nunca configurar essas vari
 
 Manter este arquivo e [`INSTALACAO.md`](INSTALACAO.md) atualizados a cada mudança relevante (feature,
 decisão de arquitetura, regra de negócio, bug corrigido) — instrução permanente do dono.
+
+## 18. Atualização de outubro/2026 — funções trazidas do Visita IA CRM v2
+
+Em 19/10/2026 o código do Visita IA CRM v2 (repo `CRM_META_IA_VISITA_IA_V2`, mesma base deste CRM)
+foi copiado pra cá, mantendo a marca Hinode Imóveis (laranja/carvão, ícones, textos), o deploy
+Portainer/GHCR e os ajustes que só existiam aqui (lotes de "Carregar mais" no Kanban/Bolsão,
+contador "entraram hoje/ontem" no Bolsão e o Relatório por corretor, agora em
+`src/components/RelatorioCorretor.tsx` + `GET /api/relatorios/corretor`). Os dois repositórios
+continuam independentes: nada é sincronizado sozinho.
+
+Migrações novas: `0024` a `0044` (só tabelas novas e colunas que aceitam vazio ou têm padrão).
+Ensaiadas antes numa cópia local com os 10 mil leads importados do CRM OKA.
+
+O que entrou (detalhe de uso em `docs/MANUAL_FUNCOES.md`; detalhe dos fluxos n8n em `n8n/README.md`):
+
+| Função | Onde no código | Precisa de configuração no servidor |
+|---|---|---|
+| Agente de IA (SDR): atende, qualifica, entende áudio, manda catálogo com fotos, só então roleta | `lib/agenteIa.ts`, `lib/catalogoIa.ts`, `routes/agenteIa.ts`, tela `/agente-ia` | `N8N_AGENTE_IA_WEBHOOK_URL`, `N8N_AGENTE_IA_TRANSCRICAO_URL`, `N8N_AGENTE_IA_SECRET` + liberar a imobiliária (`imobiliarias.ia_liberada`) |
+| Assistente de voz (Gemini Live): consulta, navega, configura o CRM por voz, câmera | `lib/assistente.ts`, `routes/assistente.ts`, `src/components/assistente/`, `src/lib/assistente/` | `GEMINI_API_KEY` + liberar (`imobiliarias.assistente_liberado`) |
+| WhatsApp API oficial híbrida (oficial + não oficial no mesmo número central), modelos | `lib/whatsappOficial.ts`, `routes/whatsappOficial.ts`, `components/WhatsappOficial.tsx` | `WA_APP_ID`, `WA_APP_SECRET`, `WA_CONFIG_ID`, `HUB_WA_KEY` + sistema cadastrado no hub |
+| Conectar com Facebook (leads em tempo real pelo hub agencia.inoovaweb.com.br) | `lib/facebook.ts`, `lib/facebookSaude.ts`, `routes/facebookWebhook.ts`, `routes/integracoes.ts` | `FB_APP_ID`, `FB_APP_SECRET`, `FB_VERIFY_TOKEN`, `HUB_LEADS_URL`, `HUB_LEADS_KEY`, `FRONTEND_URL` |
+| Aviso de lead no WhatsApp pessoal do corretor + histórico | `routes/avisosCorretor.ts`, tela `/avisos-corretor` | `N8N_AVISO_CORRETOR_WEBHOOK_URL`, `N8N_AVISO_RESULTADO_SECRET` |
+| WhatsApp de cada corretor: número desconhecido vira "contato pendente" | `routes/contatosWhatsapp.ts`, `components/ContatosPendentes.tsx` | — |
+| Importar planilha (Excel/CSV) com lote guardado e distribuição | `routes/importacoes.ts`, tela `/importacoes` | — |
+| Lead repetido vira recadastro no mesmo card; etiqueta "Fora do horário"; data/hora de entrada | `routes/captacao.ts`, `lib/telefone.ts`, `lib/foraDoHorario.ts` | — |
+| Recusas da roleta no histórico + Relatórios completos por período | `routes/relatorios.ts`, `lib/roleta.ts` | — |
+| Várias caixas de entrada (números centrais), IA por número | `lib/numeros.ts` | — |
+| Ajustes salvam no servidor (perfil, senha, imobiliária, uso) | `routes/config.ts`, `pages/Configuracoes.tsx` | — |
+
+Sem as variáveis da última coluna, a função correspondente fica desligada sem quebrar nada
+(ex.: sem `N8N_AGENTE_IA_WEBHOOK_URL` o lead vai direto pra roleta, como antes).

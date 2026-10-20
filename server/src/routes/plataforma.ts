@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { and, eq, sql, desc, inArray } from 'drizzle-orm';
+import { and, eq, sql, desc, inArray, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { imobiliarias, perfis, leads, colunasKanban, pagamentos, adminsPlataforma, sessoesWhatsapp } from '../db/schema.js';
+import { imobiliarias, perfis, leads, colunasKanban, pagamentos, adminsPlataforma, sessoesWhatsapp, iaTurnos, assistenteSessoes } from '../db/schema.js';
 import { signPlatformToken } from '../lib/jwt.js';
 import { requirePlataforma } from '../middleware/plataforma.js';
 import { pararSessao, wahaConfigurado } from '../lib/waha.js';
@@ -109,6 +109,7 @@ plataformaRouter.get('/imobiliarias', async (_req, res) => {
     .from(pagamentos).where(inArray(pagamentos.imobiliariaId, ids))
     .groupBy(pagamentos.imobiliariaId);
 
+  const iaMes = await consumoIaMes(ids);
   const cMap = new Map(corretoresPorImob.map(r => [r.imobiliariaId, r.n]));
   const lMap = new Map(leadsPorImob.map(r => [r.imobiliariaId, r.n]));
   const pMap = new Map(ultimoPagto.map(r => [r.imobiliariaId, r.pagoEm]));
@@ -131,8 +132,30 @@ plataformaRouter.get('/imobiliarias', async (_req, res) => {
       : null,
     ultimoPagamento: pMap.get(i.id) || null,
     criadoEm: i.criadoEm,
+    iaLiberada: i.iaLiberada,
+    iaUsaChaveSaas: i.iaUsaChaveSaas,
+    assistenteLiberado: i.assistenteLiberado,
+    assistenteMinutosMes: i.assistenteMinutosMes,
+    iaMes: iaMes.get(i.id) ?? { atendimentos: 0, turnos: 0, tokensSaas: 0 },
   })));
 });
+
+/** Consumo do Agente de IA no mês corrente, por imobiliária (pra cobrança quando a chave é do SaaS). */
+async function consumoIaMes(ids: string[]) {
+  const mapa = new Map<string, { atendimentos: number; turnos: number; tokensSaas: number }>();
+  if (!ids.length) return mapa;
+  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0, 0, 0, 0);
+  const rows = await db.select({
+    imobiliariaId: iaTurnos.imobiliariaId,
+    atendimentos: sql<number>`count(distinct ${iaTurnos.leadId})::int`,
+    turnos: sql<number>`count(*)::int`,
+    tokensSaas: sql<number>`coalesce(sum(case when ${iaTurnos.chaveSaas} then ${iaTurnos.tokens} else 0 end), 0)::int`,
+  }).from(iaTurnos)
+    .where(and(inArray(iaTurnos.imobiliariaId, ids), gte(iaTurnos.criadoEm, inicioMes)))
+    .groupBy(iaTurnos.imobiliariaId);
+  for (const r of rows) mapa.set(r.imobiliariaId, { atendimentos: r.atendimentos, turnos: r.turnos, tokensSaas: r.tokensSaas });
+  return mapa;
+}
 
 // --- criar imobiliária + dono ---
 
@@ -183,6 +206,15 @@ plataformaRouter.post('/imobiliarias', async (req, res) => {
 
 // --- detalhe ---
 
+/** Minutos do assistente de voz usados no mês corrente (horário de Brasília). */
+async function minutosAssistenteNoMes(imobiliariaId: string) {
+  const agoraBr = new Date(Date.now() - 3 * 3600 * 1000);
+  const inicio = new Date(Date.UTC(agoraBr.getUTCFullYear(), agoraBr.getUTCMonth(), 1, 3));
+  const [r] = await db.select({ s: sql<number>`coalesce(sum(${assistenteSessoes.segundos}), 0)::int` }).from(assistenteSessoes)
+    .where(and(eq(assistenteSessoes.imobiliariaId, imobiliariaId), gte(assistenteSessoes.iniciadaEm, inicio)));
+  return Math.ceil((r?.s ?? 0) / 60);
+}
+
 plataformaRouter.get('/imobiliarias/:id', async (req, res) => {
   const [imob] = await db.select().from(imobiliarias).where(eq(imobiliarias.id, req.params.id)).limit(1);
   if (!imob) return res.status(404).json({ error: 'Imobiliária não encontrada' });
@@ -205,6 +237,12 @@ plataformaRouter.get('/imobiliarias/:id', async (req, res) => {
     proximoVencimento: imob.proximoVencimento,
     observacoes: imob.observacoes,
     criadoEm: imob.criadoEm,
+    iaLiberada: imob.iaLiberada,
+    iaUsaChaveSaas: imob.iaUsaChaveSaas,
+    assistenteLiberado: imob.assistenteLiberado,
+    assistenteMinutosMes: imob.assistenteMinutosMes,
+    assistenteMinutosUsados: await minutosAssistenteNoMes(imob.id),
+    iaMes: (await consumoIaMes([imob.id])).get(imob.id) ?? { atendimentos: 0, turnos: 0, tokensSaas: 0 },
     equipe,
     corretores: equipe.filter(e => e.role === 'corretor').length,
     leads: nLeads,
@@ -225,6 +263,10 @@ const editarSchema = z.object({
   diasCarencia: z.number().int().min(0).max(60).optional(),
   proximoVencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   observacoes: z.string().nullable().optional(),
+  iaLiberada: z.boolean().optional(),
+  iaUsaChaveSaas: z.boolean().optional(),
+  assistenteLiberado: z.boolean().optional(),
+  assistenteMinutosMes: z.number().int().min(0).max(100000).optional(),
 });
 
 plataformaRouter.patch('/imobiliarias/:id', async (req, res) => {
@@ -242,9 +284,13 @@ plataformaRouter.patch('/imobiliarias/:id', async (req, res) => {
   if (p.diasCarencia !== undefined) patch.diasCarencia = p.diasCarencia;
   if (p.proximoVencimento !== undefined) patch.proximoVencimento = p.proximoVencimento;
   if (p.observacoes !== undefined) patch.observacoes = p.observacoes;
+  if (p.iaLiberada !== undefined) patch.iaLiberada = p.iaLiberada;
+  if (p.iaUsaChaveSaas !== undefined) patch.iaUsaChaveSaas = p.iaUsaChaveSaas;
+  if (p.assistenteLiberado !== undefined) patch.assistenteLiberado = p.assistenteLiberado;
+  if (p.assistenteMinutosMes !== undefined) patch.assistenteMinutosMes = p.assistenteMinutosMes;
 
   const [row] = await db.update(imobiliarias).set(patch).where(eq(imobiliarias.id, req.params.id)).returning();
-  res.json({ id: row.id, nome: row.nome, plano: row.plano, mensalidade: Number(row.mensalidade), limiteCorretores: row.limiteCorretores, diasCarencia: row.diasCarencia, proximoVencimento: row.proximoVencimento, observacoes: row.observacoes });
+  res.json({ id: row.id, nome: row.nome, plano: row.plano, mensalidade: Number(row.mensalidade), limiteCorretores: row.limiteCorretores, diasCarencia: row.diasCarencia, proximoVencimento: row.proximoVencimento, observacoes: row.observacoes, iaLiberada: row.iaLiberada, iaUsaChaveSaas: row.iaUsaChaveSaas, assistenteLiberado: row.assistenteLiberado, assistenteMinutosMes: row.assistenteMinutosMes });
 });
 
 // --- bloquear / liberar (manual) ---

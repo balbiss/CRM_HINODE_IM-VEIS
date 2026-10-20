@@ -1,0 +1,1 @@
+ALTER TABLE "agentes_ia" ALTER COLUMN "mensagem_passagem" SET DEFAULT 'Perfeito! Vou passar suas informações para um dos nossos corretores.';

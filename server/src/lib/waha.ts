@@ -10,7 +10,7 @@ export const wahaConfigurado = () => !!(base() && key());
 
 type WahaOpts = { method?: string; body?: unknown };
 async function waha<T = unknown>(path: string, opts: WahaOpts = {}): Promise<T> {
-  if (!wahaConfigurado()) throw new Error('WAHA não configurado (defina WAHA_URL e WAHA_API_KEY no server/.env)');
+  if (!wahaConfigurado()) throw new Error('WhatsApp não oficial indisponível (WAHA_URL / WAHA_API_KEY não definidos)');
   const r = await fetch(base() + path, {
     method: opts.method ?? 'GET',
     headers: { 'X-Api-Key': key(), 'Content-Type': 'application/json' },
@@ -19,7 +19,7 @@ async function waha<T = unknown>(path: string, opts: WahaOpts = {}): Promise<T> 
   const txt = await r.text();
   let json: unknown = null;
   try { json = txt ? JSON.parse(txt) : null; } catch { /* resposta não-json */ }
-  if (!r.ok) throw new Error(`WAHA ${path} -> ${r.status} ${txt.slice(0, 200)}`);
+  if (!r.ok) throw new Error(`não oficial ${path} -> ${r.status} ${txt.slice(0, 200)}`);
   return json as T;
 }
 
@@ -96,7 +96,8 @@ export async function qrSessao(sessionName: string): Promise<string | null> {
   }
 }
 
-const chatId = (numero: string) => numero.replace(/[^0-9]/g, '') + '@c.us';
+// Aceita telefone ("559198...") ou um chatId já resolvido ("...@lid" / "...@c.us"), que passa direto.
+const chatId = (numero: string) => (numero.includes('@') ? numero : numero.replace(/[^0-9]/g, '') + '@c.us');
 
 /** URL da foto de perfil do contato no WhatsApp (null se não tiver / for privada). */
 export async function fotoPerfil(sessionName: string, numero: string): Promise<string | null> {
@@ -114,6 +115,21 @@ export async function enviarTexto(sessionName: string, numero: string, texto: st
   return waha('/api/sendText', { method: 'POST', body: { session: sessionName, chatId: chatId(numero), text: texto } });
 }
 
+/** Contorno NÃO-oficial pra um bug conhecido do WAHA no engine GOWS (issue aberta
+ *  devlikeapro/waha#2214, sem correção confirmada até a versão 2026.9.1): às vezes o
+ *  `/api/sendText` falha com "no LID found for ...@s.whatsapp.net" porque o servidor do
+ *  WhatsApp não resolveu a identidade LID do contato a tempo. Forçar essa consulta antes de
+ *  mandar a mensagem foi reportado por outro usuário como um jeito de "esquentar" a resolução.
+ *  Best-effort: se falhar, ignora e deixa o envio normal tentar mesmo assim. */
+export async function resolverLid(sessionName: string, numero: string): Promise<void> {
+  try {
+    const fone = numero.replace(/[^0-9]/g, '');
+    await waha(`/api/${sessionName}/lids/pn/${fone}`);
+  } catch {
+    // contorno experimental — se o endpoint não existir ou falhar, segue sem travar nada
+  }
+}
+
 /** Confere se o número existe no WhatsApp antes de mandar a 1ª mensagem da régua.
  *  true = existe, false = não existe, null = não deu pra checar (WAHA fora / sessão off). */
 export async function checarNumero(sessionName: string, numero: string): Promise<boolean | null> {
@@ -125,6 +141,85 @@ export async function checarNumero(sessionName: string, numero: string): Promise
     return typeof r?.numberExists === 'boolean' ? r.numberExists : null;
   } catch {
     return null;
+  }
+}
+
+/** chatId que o próprio WhatsApp reconhece pra esse número (check-exists, pode vir @lid).
+ *  existe=false → o número não tem WhatsApp; null → não deu pra checar. */
+export async function resolverChatId(sessionName: string, numero: string): Promise<{ chatId: string; existe: boolean | null }> {
+  const fone = numero.replace(/[^0-9]/g, '');
+  const chk = await waha<{ numberExists?: boolean; chatId?: string }>(
+    `/api/contacts/check-exists?phone=${encodeURIComponent(fone)}&session=${encodeURIComponent(sessionName)}`,
+  ).catch(() => null);
+  return { chatId: chk?.chatId || chatId(fone), existe: typeof chk?.numberExists === 'boolean' ? chk.numberExists : null };
+}
+
+/** Presença no chat — best-effort, com prazo curto pra nunca segurar a resposta:
+ *  'visto' = visto azul; 'digitando' = fica ONLINE e mostra "digitando…" (o WhatsApp não mostra
+ *  "digitando" de quem está offline, e a sessão fica offline por padrão); 'parar' = tira o
+ *  "digitando"; 'offline' = volta a ficar offline (senão o celular do número para de receber push). */
+export async function presenca(sessionName: string, chatIdAlvo: string, acao: 'visto' | 'digitando' | 'parar' | 'offline') {
+  const chamar = async (rota: string, body: unknown) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      await fetch(base() + rota, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'X-Api-Key': key(), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    } catch { /* presença é enfeite: se falhar, a mensagem sai do mesmo jeito */ } finally { clearTimeout(t); }
+  };
+  if (acao === 'visto') return chamar('/api/sendSeen', { session: sessionName, chatId: chatIdAlvo });
+  if (acao === 'offline') return chamar(`/api/${sessionName}/presence`, { presence: 'offline' });
+  if (acao === 'parar') return chamar(`/api/${sessionName}/presence`, { chatId: chatIdAlvo, presence: 'paused' });
+  await chamar(`/api/${sessionName}/presence`, { presence: 'online' });
+  await chamar(`/api/${sessionName}/presence`, { chatId: chatIdAlvo, presence: 'typing' });
+}
+
+/** Envia texto usando o chatId que o próprio WhatsApp resolve (check-exists, pode ser @lid) —
+ *  evita o "no LID found" com contato que nunca falou com o número. Devolve o id da mensagem.
+ *  Lança 'NUMERO_INEXISTENTE' se o número não tem WhatsApp. */
+export async function enviarTextoResolvido(sessionName: string, numero: string, texto: string, chatIdPronto?: string): Promise<{ id: string | null }> {
+  let alvo = chatIdPronto;
+  if (!alvo) {
+    const r = await resolverChatId(sessionName, numero);
+    if (r.existe === false) throw new Error('NUMERO_INEXISTENTE');
+    alvo = r.chatId;
+  }
+  const r = await waha<{ id?: string | { _serialized?: string }; key?: { id?: string } }>('/api/sendText', {
+    method: 'POST', body: { session: sessionName, chatId: alvo, text: texto },
+  });
+  const id = typeof r?.id === 'string' ? r.id : r?.id?._serialized || r?.key?.id || null;
+  return { id };
+}
+
+/** Envia uma foto (URL pública) com legenda, no chatId já resolvido. Devolve o id da mensagem. */
+export async function enviarImagemResolvida(sessionName: string, chatIdAlvo: string, url: string, legenda: string): Promise<{ id: string | null }> {
+  const r = await waha<{ id?: string | { _serialized?: string }; key?: { id?: string } }>('/api/sendImage', {
+    method: 'POST',
+    body: { session: sessionName, chatId: chatIdAlvo, caption: legenda, file: { url, mimetype: 'image/jpeg', filename: 'imovel.jpg' } },
+  });
+  const id = typeof r?.id === 'string' ? r.id : r?.id?._serialized || r?.key?.id || null;
+  return { id };
+}
+
+export type MensagemHistorico = { id: string; timestamp: number; fromMe: boolean; body?: string | null; hasMedia?: boolean };
+
+/** Últimas mensagens de uma conversa, direto do WhatsApp (mais nova primeiro). Usa o chatId
+ *  resolvido pelo check-exists (pode ser @lid), que é o que o WhatsApp de fato reconhece. */
+export async function historicoConversa(sessionName: string, numero: string, limite = 30): Promise<MensagemHistorico[]> {
+  try {
+    const fone = numero.replace(/[^0-9]/g, '');
+    const chk = await waha<{ chatId?: string }>(
+      `/api/contacts/check-exists?phone=${encodeURIComponent(fone)}&session=${encodeURIComponent(sessionName)}`,
+    ).catch(() => null);
+    const id = chk?.chatId || chatId(fone);
+    const msgs = await waha<MensagemHistorico[]>(
+      `/api/${sessionName}/chats/${encodeURIComponent(id)}/messages?limit=${limite}&downloadMedia=false`,
+    );
+    return Array.isArray(msgs) ? msgs : [];
+  } catch {
+    return [];
   }
 }
 

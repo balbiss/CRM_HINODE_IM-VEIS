@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Menu, Bell } from 'lucide-react';
+import { BotaoAssistente } from './assistente/BotaoAssistente';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo, scopeLeads } from '../lib/selectors';
 import { ini, canalPill } from '../lib/format';
@@ -80,6 +81,7 @@ export function Topbar() {
           <span style={{ width: 6, height: 6, background: 'var(--terra)', transform: 'rotate(45deg)' }} />Visualizando como: {role}
         </span>
       )}
+      <BotaoAssistente />
       <button className="topbar-theme" onClick={toggleTheme} title="Alternar tema" style={{ width: 34, height: 34, border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
         <span style={{ width: 12, height: 12, borderRadius: '50%', background: theme === 'dark' ? 'var(--sideInk)' : 'var(--ink)', boxShadow: 'inset 4px 0 0 ' + (theme === 'dark' ? 'var(--card)' : 'transparent') }} />
       </button>

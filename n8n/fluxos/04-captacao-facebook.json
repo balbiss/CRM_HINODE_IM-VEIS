@@ -1,0 +1,316 @@
+{
+  "name": "CRM HINODE — CAPTAÇÃO FACEBOOK (DINÂMICO)",
+  "nodes": [
+    {
+      "id": "nota-2d4ze34z",
+      "name": "Leia-me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -300
+      ],
+      "parameters": {
+        "content": "## Captação de leads dos formulários da Meta (todas as imobiliárias)\nA cada 5 min lê as conexões Facebook ativas (__URL_API_CRM__/api/integracoes/facebook/ativas), busca os leads novos de cada formulário no Graph API (marca-d'água por conexão em staticData), manda cada lead pro CRM com o imobiliariaId certo e reporta o status da conexão.\n\nCredenciais Header Auth: \"CRM — x-integracoes-secret\" e \"CRM — x-captacao-secret\". Trocar __URL_API_CRM__.",
+        "width": 640,
+        "height": 260,
+        "color": 4
+      }
+    },
+    {
+      "id": "c1",
+      "name": "A cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c2",
+      "name": "Buscar conexoes ativas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "url": "__URL_API_CRM__/api/integracoes/facebook/ativas",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "CRM — x-integracoes-secret"
+        }
+      }
+    },
+    {
+      "id": "c3",
+      "name": "Preparar chamadas Graph",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const nowSec = Math.floor(Date.now() / 1000);\nconst state = $getWorkflowStaticData('global');\nconst out = [];\nfor (const item of $input.all()) {\n  const c = item.json;\n  const key = 'fb_' + c.id;\n  const since = state[key] || (nowSec - 600);\n  const filtering = encodeURIComponent(JSON.stringify([{ field: 'time_created', operator: 'GREATER_THAN', value: since }]));\n  const url = 'https://graph.facebook.com/v21.0/' + encodeURIComponent(c.formId) + '/leads?access_token=' + encodeURIComponent(c.accessToken) + '&fields=id,created_time,ad_name,campaign_name,field_data&filtering=' + filtering + '&limit=100';\n  out.push({ json: { connId: c.id, imobiliariaId: c.imobiliariaId, formId: c.formId, since: since, graphUrl: url } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "c4",
+      "name": "Buscar leads no Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "url": "={{ $json.graphUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "c5",
+      "name": "Processar leads e status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const state = $getWorkflowStaticData('global');\nconst prep = $('Preparar chamadas Graph').all();\nconst reslist = $input.all();\nconst out = [];\nfor (let i = 0; i < reslist.length; i++) {\n  const meta = (prep[i] && prep[i].json) || {};\n  const resp = reslist[i].json || {};\n  const body = resp.body || resp;\n  const status = resp.statusCode || 200;\n  if (status >= 400 || (body && body.error)) {\n    const msg = (body && body.error && body.error.message) || ('Graph API status ' + status);\n    out.push({ json: { tipo: 'status', connId: meta.connId, ok: false, erro: String(msg).slice(0, 400), leadsCaptados: 0 } });\n    continue;\n  }\n  const leads = Array.isArray(body.data) ? body.data : [];\n  let maxTs = state['fb_' + meta.connId] || 0;\n  const seenKey = 'fb_seen_' + meta.connId;\n  const seen = new Set(state[seenKey] || []);\n  let novos = 0;\n  for (const L of leads) {\n    const ts = Math.floor(new Date(L.created_time).getTime() / 1000);\n    if (ts > maxTs) maxTs = ts;\n    if (seen.has(L.id)) continue;\n    seen.add(L.id);\n    const fd = {};\n    for (const f of (L.field_data || [])) { fd[String(f.name || '').toLowerCase()] = (f.values && f.values[0]) || ''; }\n    const nome = fd.full_name || fd.nome || fd.name || fd.nome_completo || 'Lead do Facebook';\n    const telefone = fd.phone_number || fd.telefone || fd.phone || fd.whatsapp || fd.celular || '';\n    const email = fd.email || fd['e-mail'] || '';\n    if (!telefone) continue;\n    const campanha = L.campaign_name || L.ad_name || '';\n    novos++;\n    out.push({ json: { tipo: 'lead', imobiliariaId: meta.imobiliariaId, connId: meta.connId, nome: nome, telefone: telefone, email: email, mensagem: fd.mensagem || fd.message || '', campanha: campanha } });\n  }\n  state['fb_' + meta.connId] = maxTs;\n  state[seenKey] = Array.from(seen).slice(-300);\n  out.push({ json: { tipo: 'status', connId: meta.connId, ok: true, erro: '', leadsCaptados: novos } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "c6",
+      "name": "Lead ou status?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1104,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "lead"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "status"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "status"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c7",
+      "name": "Enviar lead pro CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1328,
+        -80
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "__URL_API_CRM__/api/captacao/facebook",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ imobiliariaId: $json.imobiliariaId, nome: $json.nome, telefone: $json.telefone, canal: \"Facebook\", email: $json.email || undefined, mensagem: $json.mensagem || undefined, campanha: $json.campanha || undefined }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "CRM — x-captacao-secret"
+        }
+      }
+    },
+    {
+      "id": "c8",
+      "name": "Reportar status da conexao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1328,
+        80
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "__URL_API_CRM__/api/integracoes/facebook/sync-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ id: $json.connId, ok: $json.ok, erro: $json.erro || undefined, leadsCaptados: $json.leadsCaptados }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "CRM — x-integracoes-secret"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 5 min": {
+      "main": [
+        [
+          {
+            "node": "Buscar conexoes ativas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar conexoes ativas": {
+      "main": [
+        [
+          {
+            "node": "Preparar chamadas Graph",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar chamadas Graph": {
+      "main": [
+        [
+          {
+            "node": "Buscar leads no Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar leads no Facebook": {
+      "main": [
+        [
+          {
+            "node": "Processar leads e status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar leads e status": {
+      "main": [
+        [
+          {
+            "node": "Lead ou status?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead ou status?": {
+      "main": [
+        [
+          {
+            "node": "Enviar lead pro CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reportar status da conexao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

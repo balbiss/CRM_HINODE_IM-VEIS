@@ -1,21 +1,25 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp } from '../db/schema.js';
+import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosPendentes, contatosIgnorados } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { wahaConfigurado, criarSessao, pararSessao, statusSessao, qrSessao, webhookSecret, fotoPerfil, baixarMidiaMensagem } from '../lib/waha.js';
 import { uploadFile } from '../lib/storage.js';
 import { distribuirLead } from '../lib/roleta.js';
+import { configIa, iniciarIa, ehEcoDaIa, pausarIa, mensagemDoCliente, clienteAguardandoCorretor, transcreverAudio } from '../lib/agenteIa.js';
 import { enviarPush } from '../lib/push.js';
 import { registrarEvento } from '../lib/eventos.js';
+import { marcarForaDoHorario } from '../lib/foraDoHorario.js';
 import { pausarPorResposta } from '../lib/followup.js';
+import { chaveDaMensagem, enviarAoLead, hubLiberarNumero, publica, reservarChave } from '../lib/whatsappOficial.js';
+import { numeroCentralDoLead } from '../lib/numeros.js';
 import type { Server as SocketServer } from 'socket.io';
 
 const soDigitos = (s: string) => (s || '').replace(/[^0-9]/g, '');
 
 /** 5591982935558 -> (91) 98293-5558 ; formata BR quando dá, senão devolve o número cru. */
-function formatarTelefone(num: string): string {
+export function formatarTelefone(num: string): string {
   const d = soDigitos(num);
   const semPais = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;
   const m = semPais.match(/^(\d{2})(\d{4,5})(\d{4})$/);
@@ -113,76 +117,8 @@ export function whatsappRouter(io: SocketServer) {
         if (existe) return;
       }
 
-      // acha o lead pelo telefone dentro da imobiliária (do corretor, se a sessão é de um corretor)
-      const escopoLeads = sessao.escopo === 'corretor' && sessao.corretorId
-        ? and(eq(leads.imobiliariaId, sessao.imobiliariaId), eq(leads.corretorId, sessao.corretorId))
-        : eq(leads.imobiliariaId, sessao.imobiliariaId);
       // Nome do perfil do WhatsApp (quando não veio de formulário de campanha).
       const pushName: string = (fromMe ? '' : (p.notifyName || p._data?.notifyName || info.PushName || p._data?.pushName || '')).trim();
-      const nomePlaceholder = 'Contato ' + formatarTelefone(numero);
-
-      const candidatos = await db.select().from(leads).where(escopoLeads);
-      let lead = candidatos.find(l => mesmoNumero(l.telefone, numero));
-
-      // sem lead e é mensagem RECEBIDA -> cria um lead novo na coluna "Lead Novo"
-      if (!lead && !fromMe) {
-        const [colNova] = await db.select().from(colunasKanban)
-          .where(and(eq(colunasKanban.imobiliariaId, sessao.imobiliariaId), eq(colunasKanban.slug, 'novo'))).limit(1);
-        const [novo] = await db.insert(leads).values({
-          imobiliariaId: sessao.imobiliariaId,
-          nome: pushName || nomePlaceholder,
-          telefone: numero,
-          canal: 'WhatsApp',
-          colunaId: colNova?.id,
-          sessaoWhatsappId: sessao.id,
-          corretorId: sessao.escopo === 'corretor' ? sessao.corretorId : null,
-        }).returning();
-        lead = novo;
-        registrarEvento(sessao.imobiliariaId, novo.id, 'criado', 'Lead criado pela primeira mensagem no WhatsApp', novo.nome);
-        io.to('imobiliaria:' + sessao.imobiliariaId).emit('lead:created', novo);
-        // modo central: sem corretor fixo -> roleta. modo corretor: já nasceu com o dono da sessão.
-        if (!novo.corretorId) {
-          const leadNovoId = novo.id, imobNovo = sessao.imobiliariaId;
-          void distribuirLead(io, imobNovo, leadNovoId).catch(e => console.error('roleta wa:', (e as Error).message));
-        }
-      }
-      if (!lead) return;
-
-      // Carimba por qual número o lead entrou (se ainda não tiver).
-      if (!lead.sessaoWhatsappId) {
-        await db.update(leads).set({ sessaoWhatsappId: sessao.id }).where(eq(leads.id, lead.id)).catch(() => {});
-        lead = { ...lead, sessaoWhatsappId: sessao.id };
-      }
-
-      // Lead já existia com nome-placeholder e agora temos o nome do perfil -> atualiza.
-      if (pushName && lead.nome !== pushName && /^(Contato |WhatsApp )/.test(lead.nome)) {
-        const [atualizado] = await db.update(leads).set({ nome: pushName }).where(eq(leads.id, lead.id)).returning();
-        if (atualizado) {
-          lead = atualizado;
-          io.to('imobiliaria:' + sessao.imobiliariaId).emit('lead:updated', atualizado);
-        }
-      }
-
-      // Foto de perfil do WhatsApp — busca uma vez (fire-and-forget) se o lead ainda não tem.
-      // A URL do WhatsApp expira, então baixa e guarda no MinIO (cai de volta na URL crua se o upload falhar).
-      if (!lead.fotoUrl && !fromMe) {
-        const leadId = lead.id, imobId = sessao.imobiliariaId, sn = sessao.sessionName, tel = numero;
-        void (async () => {
-          const urlWa = await fotoPerfil(sn, tel);
-          if (!urlWa) return;
-          let fotoUrl = urlWa;
-          try {
-            const img = await fetch(urlWa);
-            if (img.ok) {
-              const buf = Buffer.from(await img.arrayBuffer());
-              const ct = img.headers.get('content-type') || 'image/jpeg';
-              fotoUrl = await uploadFile(`perfis-wa/${leadId}.jpg`, buf, ct);
-            }
-          } catch { /* usa a URL crua do WhatsApp */ }
-          const [row] = await db.update(leads).set({ fotoUrl }).where(and(eq(leads.id, leadId), isNull(leads.fotoUrl))).returning();
-          if (row) io.to('imobiliaria:' + imobId).emit('lead:updated', row);
-        })().catch(() => {});
-      }
 
       // Tipo do anexo pelo shape do GOWS (_data.Message.xxxMessage) ou pelo mimetype/type.
       const msgKeys = Object.keys(p._data?.Message || {});
@@ -195,58 +131,14 @@ export function whatsappRouter(io: SocketServer) {
           : /image|video|audio/i.test(mimeHint) ? (/image/i.test(mimeHint) ? 'imagem' : /video/i.test(mimeHint) ? 'video' : 'audio')
           : msgKeys.length ? 'documento' : null)
         : null;
+      const anexoNome: string | null = p.media?.filename || p._data?.Message?.documentMessage?.fileName || p._data?.Message?.documentMessage?.title || null;
+      const chatIdMidia = String((fromMe ? p.to || info.Chat : p.from || info.Chat) || '');
 
-      // SEMPRE baixa a mídia e sobe pro MinIO — a URL do WAHA (media.url) exige X-Api-Key,
-      // então o navegador não consegue abrir direto (img/audio/pdf davam 401).
-      let anexoUrl: string | null = null;
-      let anexoNome: string | null = p.media?.filename || p._data?.Message?.documentMessage?.fileName || p._data?.Message?.documentMessage?.title || null;
-      if (anexoTipo && waId) {
-        const chatIdMidia = fromMe ? p.to || info.Chat : p.from || info.Chat;
-        const m = await baixarMidiaMensagem(ev.session, String(chatIdMidia || ''), waId).catch(() => null);
-        if (m) {
-          const ext = (m.filename?.match(/\.[a-z0-9]{1,6}$/i)?.[0])
-            || ({ 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/opus': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'application/pdf': '.pdf' } as Record<string, string>)[m.mimetype]
-            || '.bin';
-          const nomeArquivo = (anexoTipo === 'documento' && m.filename) ? m.filename : (waId.replace(/[^a-z0-9]/gi, '').slice(-24) + ext);
-          anexoUrl = await uploadFile(`wa/${lead.id}/${nomeArquivo}`, m.buffer, m.mimetype).catch(() => null);
-          if (!anexoNome && anexoTipo === 'documento') anexoNome = m.filename;
-        }
-      }
-
-      const inseridas = await db.insert(mensagensWhatsapp).values({
-        leadId: lead.id,
-        direcao: fromMe ? 'out' : 'in',
-        canal: 'corretor',
-        waMessageId: waId ?? null,
-        ackStatus: fromMe ? 2 : null,
-        enviadoPor: fromMe ? (sessao.corretorId ?? null) : null,
-        texto,
-        anexoUrl,
-        anexoTipo,
-        anexoNome,
-      }).onConflictDoNothing().returning(); // ON CONFLICT DO NOTHING (sem target — casa com o índice parcial)
-
-      const msg = inseridas[0];
-      if (!msg) return; // era duplicada (webhook 2x) — ignora em silêncio
-      io.to('imobiliaria:' + sessao.imobiliariaId).emit('mensagem:created', msg);
-
-      // lead respondeu -> pausa a régua de follow-up (o corretor assume)
-      if (!fromMe) void pausarPorResposta(io, sessao.imobiliariaId, lead.id);
-
-      // mensagem RECEBIDA -> push pro corretor dono do lead (mesmo com o CRM fechado)
-      if (!fromMe && lead.corretorId) {
-        const previa = texto ? texto.slice(0, 80)
-          : anexoTipo === 'imagem' ? 'Enviou uma foto'
-          : anexoTipo === 'audio' ? 'Enviou um áudio'
-          : anexoTipo === 'video' ? 'Enviou um vídeo'
-          : anexoTipo ? 'Enviou um arquivo' : 'Nova mensagem';
-        enviarPush(lead.corretorId, {
-          title: lead.nome,
-          body: previa,
-          url: '/conversas',
-          tag: 'msg-' + lead.id,
-        }).catch(() => {});
-      }
+      await processarMensagem(io, sessao, {
+        fromMe, numero, texto, waId: waId ?? null, pushName, anexoTipo, anexoNome,
+        // a URL do WAHA (media.url) exige X-Api-Key — baixa aqui e sobe pro MinIO
+        baixarMidia: () => (waId ? baixarMidiaMensagem(ev.session!, chatIdMidia, waId) : Promise.resolve(null)),
+      });
     } catch (e) {
       console.error('webhook WAHA:', (e as Error).message);
     }
@@ -259,7 +151,7 @@ export function whatsappRouter(io: SocketServer) {
 
   router.get('/status', async (req, res) => {
     const rows = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId));
-    res.json({ wahaConfigurado: wahaConfigurado(), conectadas: rows.filter(r => r.status === 'conectada').length, total: rows.length });
+    res.json({ naoOficialDisponivel: wahaConfigurado(), conectadas: rows.filter(r => r.status === 'conectada').length, total: rows.length });
   });
 
   // Dono/Gerente mexem em qualquer sessão. Corretor só mexe no PRÓPRIO número,
@@ -287,6 +179,15 @@ export function whatsappRouter(io: SocketServer) {
     }
     next();
   };
+  // Rótulo dos números centrais, liberado até pro corretor: a tela de Conversas mostra por qual
+  // número (caixa de entrada) cada lead fala. Só id/rótulo/número — nada de gestão.
+  router.get('/numeros-centrais', async (req, res) => {
+    res.json(await db.select({ id: sessoesWhatsapp.id, rotulo: sessoesWhatsapp.rotulo, numero: sessoesWhatsapp.numero })
+      .from(sessoesWhatsapp)
+      .where(and(eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId), eq(sessoesWhatsapp.escopo, 'central')))
+      .orderBy(asc(sessoesWhatsapp.criadoEm)));
+  });
+
   router.use(gestaoSessoes);
 
   async function refrescar(sessionName: string, id: string) {
@@ -304,11 +205,11 @@ export function whatsappRouter(io: SocketServer) {
     // atualiza status de cada uma no WAHA (em paralelo)
     await Promise.all(rows.map(r => refrescar(r.sessionName, r.id).catch(() => {})));
     const atualizados = await db.select().from(sessoesWhatsapp).where(escopoSessoes);
-    res.json({ wahaConfigurado: wahaConfigurado(), sessoes: atualizados });
+    res.json({ naoOficialDisponivel: wahaConfigurado(), sessoes: atualizados.map(publica) });
   });
 
   router.post('/sessoes', async (req, res) => {
-    if (!wahaConfigurado()) return res.status(400).json({ error: 'WAHA não está configurado no servidor ainda (WAHA_URL / WAHA_API_KEY).' });
+    if (!wahaConfigurado()) return res.status(400).json({ error: 'O WhatsApp não oficial ainda não está disponível neste servidor.' });
     const parsed = z.object({
       escopo: z.enum(['central', 'corretor']),
       corretorId: z.string().uuid().optional(),
@@ -324,9 +225,9 @@ export function whatsappRouter(io: SocketServer) {
         .where(and(eq(sessoesWhatsapp.id, parsed.data.id), eq(sessoesWhatsapp.imobiliariaId, imobiliariaId))).limit(1);
       if (!ex) return res.status(404).json({ error: 'Sessão não encontrada' });
       await db.update(sessoesWhatsapp).set({ status: 'conectando', ...(parsed.data.rotulo !== undefined ? { rotulo: parsed.data.rotulo } : {}) }).where(eq(sessoesWhatsapp.id, ex.id));
-      try { await criarSessao(ex.sessionName); } catch (e) { return res.status(502).json({ error: 'WAHA recusou: ' + (e as Error).message }); }
+      try { await criarSessao(ex.sessionName); } catch (e) { console.error('conexão não oficial:', (e as Error).message); return res.status(502).json({ error: 'Não deu pra iniciar a conexão do WhatsApp. Tente de novo em instantes.' }); }
       const [row] = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, ex.id));
-      return res.status(200).json(row);
+      return res.status(200).json(publica(row));
     }
 
     if (parsed.data.escopo === 'corretor') {
@@ -342,8 +243,8 @@ export function whatsappRouter(io: SocketServer) {
       } else {
         await db.update(sessoesWhatsapp).set({ status: 'conectando' }).where(eq(sessoesWhatsapp.id, row.id));
       }
-      try { await criarSessao(nome); } catch (e) { return res.status(502).json({ error: 'WAHA recusou: ' + (e as Error).message }); }
-      return res.status(201).json(row);
+      try { await criarSessao(nome); } catch (e) { console.error('conexão não oficial:', (e as Error).message); return res.status(502).json({ error: 'Não deu pra iniciar a conexão do WhatsApp. Tente de novo em instantes.' }); }
+      return res.status(201).json(publica(row));
     }
 
     // Central: a imobiliária pode ter vários números. O 1º usa o nome legado; os demais têm sufixo.
@@ -356,9 +257,10 @@ export function whatsappRouter(io: SocketServer) {
     try {
       await criarSessao(sessionName);
     } catch (e) {
-      return res.status(502).json({ error: 'WAHA recusou: ' + (e as Error).message });
+      console.error('conexão não oficial:', (e as Error).message);
+      return res.status(502).json({ error: 'Não deu pra iniciar a conexão do WhatsApp. Tente de novo em instantes.' });
     }
-    res.status(201).json(row);
+    res.status(201).json(publica(row));
   });
 
   // Corretor só toca na própria sessão (o middleware de :id não enxerga req.params
@@ -368,15 +270,19 @@ export function whatsappRouter(io: SocketServer) {
 
   // Renomear o rótulo de uma sessão.
   router.patch('/sessoes/:id', async (req, res) => {
-    const parsed = z.object({ rotulo: z.string().max(40) }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Rótulo inválido' });
+    const parsed = z.object({ rotulo: z.string().max(40).optional(), iaAtende: z.boolean().optional() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
     const [alvo] = await db.select().from(sessoesWhatsapp)
       .where(and(eq(sessoesWhatsapp.id, req.params.id), eq(sessoesWhatsapp.imobiliariaId, req.auth!.imobiliariaId))).limit(1);
     if (!alvo) return res.status(404).json({ error: 'Sessão não encontrada' });
     if (!donoDaSessao(req, alvo)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
-    const [row] = await db.update(sessoesWhatsapp).set({ rotulo: parsed.data.rotulo })
-      .where(eq(sessoesWhatsapp.id, alvo.id)).returning();
-    res.json(row);
+    const patch: { rotulo?: string; iaAtende?: boolean } = {};
+    if (parsed.data.rotulo !== undefined) patch.rotulo = parsed.data.rotulo;
+    // liga/desliga da IA por número: coisa de gestor, não do corretor dono do número
+    if (parsed.data.iaAtende !== undefined && req.auth!.role !== 'corretor') patch.iaAtende = parsed.data.iaAtende;
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nada pra alterar' });
+    const [row] = await db.update(sessoesWhatsapp).set(patch).where(eq(sessoesWhatsapp.id, alvo.id)).returning();
+    res.json(publica(row));
   });
 
   router.get('/sessoes/:id/qr', async (req, res) => {
@@ -396,6 +302,13 @@ export function whatsappRouter(io: SocketServer) {
     if (!row) return res.status(404).json({ error: 'Sessão não encontrada' });
     if (!donoDaSessao(req, row)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
     await pararSessao(row.sessionName).catch(() => {});
+    // número híbrido: tira só o QR code (WAHA); a API oficial continua (pra tirar ela, 'Desligar' na oficial)
+    if (row.oficialAtiva) {
+      const [atual] = await db.update(sessoesWhatsapp).set({ status: 'desconectada' }).where(eq(sessoesWhatsapp.id, row.id)).returning();
+      return res.json({ ok: true, sessao: publica(atual) });
+    }
+    // número com API oficial: libera no hub (as mensagens dele voltam pro destino padrão do app)
+    if (row.oficialPhoneNumberId) await hubLiberarNumero(row.oficialPhoneNumberId);
     await db.delete(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, row.id));
     res.json({ ok: true });
   });
@@ -403,9 +316,214 @@ export function whatsappRouter(io: SocketServer) {
   return router;
 }
 
-/** Usado pelo mensagens.ts: manda a mensagem pelo WhatsApp certo (central ou do corretor). */
+/** Mensagem do WhatsApp já normalizada — vem do WAHA ou da API oficial (número híbrido). */
+export type MensagemWhatsapp = {
+  fromMe: boolean;
+  numero: string;
+  texto: string | null;
+  waId: string | null;
+  pushName: string;
+  anexoTipo: 'imagem' | 'video' | 'audio' | 'documento' | null;
+  anexoNome: string | null;
+  baixarMidia: () => Promise<{ buffer: Buffer; mimetype: string; filename: string | null } | null>;
+};
+
+
+/** Tudo o que acontece com uma mensagem do WhatsApp: acha/cria o lead, IA, roleta, mídia, push. */
+export async function processarMensagem(io: SocketServer, sessao: typeof sessoesWhatsapp.$inferSelect, m: MensagemWhatsapp) {
+  const { fromMe, numero, texto, waId, pushName, anexoTipo } = m;
+  const waChave = chaveDaMensagem(waId);
+  // no híbrido a mesma mensagem chega pelo WAHA e pela oficial quase juntas: só a 1ª passa
+  if (waChave && !reservarChave(numero, waChave)) return;
+  // acha o lead pelo telefone dentro da imobiliária (do corretor, se a sessão é de um corretor)
+  const escopoLeads = sessao.escopo === 'corretor' && sessao.corretorId
+    ? and(eq(leads.imobiliariaId, sessao.imobiliariaId), eq(leads.corretorId, sessao.corretorId))
+    : eq(leads.imobiliariaId, sessao.imobiliariaId);
+  const nomePlaceholder = 'Contato ' + formatarTelefone(numero);
+
+  const espelhoDeCorretor = sessao.escopo === 'corretor' && !!sessao.corretorId;
+  if (espelhoDeCorretor) {
+    const ignorados = await db.select({ telefone: contatosIgnorados.telefone }).from(contatosIgnorados)
+      .where(eq(contatosIgnorados.corretorId, sessao.corretorId!));
+    if (ignorados.some(i => mesmoNumero(i.telefone, numero))) return;
+  }
+
+  const candidatos = await db.select().from(leads).where(escopoLeads);
+  let lead = candidatos.find(l => mesmoNumero(l.telefone, numero));
+
+  // WhatsApp pessoal do corretor: número desconhecido NÃO vira lead sozinho (pode ser família,
+  // amigo...). Fica na lista privada dele até ele decidir "trazer pro CRM" ou "é pessoal".
+  if (!lead && espelhoDeCorretor) {
+    if (!fromMe) {
+      await db.insert(contatosPendentes).values({
+        imobiliariaId: sessao.imobiliariaId, corretorId: sessao.corretorId!, sessaoWhatsappId: sessao.id,
+        telefone: numero, nome: pushName || null,
+      }).onConflictDoUpdate({
+        target: [contatosPendentes.corretorId, contatosPendentes.telefone],
+        set: {
+          qtdMensagens: sql`${contatosPendentes.qtdMensagens} + 1`,
+          ultimaMensagemEm: new Date(),
+          ...(pushName ? { nome: pushName } : {}),
+        },
+      });
+      io.to('imobiliaria:' + sessao.imobiliariaId).emit('pendentes:mudou', { corretorId: sessao.corretorId });
+    }
+    return;
+  }
+
+  // sem lead e é mensagem RECEBIDA -> cria um lead novo na coluna "Lead Novo"
+  if (!lead && !fromMe) {
+    const [colNova] = await db.select().from(colunasKanban)
+      .where(and(eq(colunasKanban.imobiliariaId, sessao.imobiliariaId), eq(colunasKanban.slug, 'novo'))).limit(1);
+    const [novo] = await db.insert(leads).values({
+      imobiliariaId: sessao.imobiliariaId,
+      nome: pushName || nomePlaceholder,
+      telefone: numero,
+      canal: 'WhatsApp',
+      colunaId: colNova?.id,
+      sessaoWhatsappId: sessao.id,
+      corretorId: sessao.escopo === 'corretor' ? sessao.corretorId : null,
+    }).returning();
+    lead = novo;
+    registrarEvento(sessao.imobiliariaId, novo.id, 'criado', 'Lead criado pela primeira mensagem no WhatsApp', novo.nome);
+    const tagIds = await marcarForaDoHorario(io, sessao.imobiliariaId, novo.id).catch(() => null);
+    io.to('imobiliaria:' + sessao.imobiliariaId).emit('lead:created', tagIds ? { ...novo, tagIds } : novo);
+    // modo central: sem corretor fixo -> Agente de IA (se ligado) ou roleta.
+    // modo corretor: já nasceu com o dono da sessão.
+    if (!novo.corretorId) {
+      const conf = sessao.escopo === 'central' ? await configIa(sessao.imobiliariaId) : null;
+      // com várias caixas de entrada, a imobiliária escolhe em quais números a IA atende
+      const comIa = conf?.cfg.atenderWhatsapp && sessao.iaAtende ? await iniciarIa(io, sessao.imobiliariaId, novo.id, 'whatsapp') : null;
+      if (comIa) lead = comIa;
+      else void distribuirLead(io, sessao.imobiliariaId, novo.id).catch(e => console.error('roleta wa:', (e as Error).message));
+    }
+  }
+  // Lead guardado de planilha que mandou mensagem: está ativo — sai da espera e vai pra roleta.
+  if (lead && lead.importacaoPendente && !fromMe) {
+    const [liberado] = await db.update(leads).set({ importacaoPendente: false }).where(eq(leads.id, lead.id)).returning();
+    lead = liberado;
+    registrarEvento(sessao.imobiliariaId, lead.id, 'importacao', 'Lead da planilha mandou mensagem — saiu da espera e foi pra roleta', 'Sistema');
+    io.to('imobiliaria:' + sessao.imobiliariaId).emit('lead:created', lead);
+    if (!lead.corretorId) void distribuirLead(io, sessao.imobiliariaId, lead.id).catch(e => console.error('roleta planilha:', (e as Error).message));
+  }
+  if (!lead) return;
+
+  // Já está no CRM com essa chave? (o CRM mandou por uma via e o eco voltou pela outra, ou a
+  // mesma mensagem recebida chegou pelo WAHA e pela oficial)
+  if (waChave) {
+    const [ja] = await db.select({ id: mensagensWhatsapp.id }).from(mensagensWhatsapp)
+      .where(and(eq(mensagensWhatsapp.leadId, lead.id), eq(mensagensWhatsapp.waChave, waChave))).limit(1);
+    if (ja) return;
+  }
+
+  // Eco de mensagem que a própria IA mandou: ela já gravou a dela, e não é "humano respondendo".
+  if (fromMe && ehEcoDaIa(lead.id, texto)) return;
+  if (fromMe && lead.iaStatus === 'atendendo') void pausarIa(io, lead.id, 'alguém respondeu pelo celular');
+
+  // Carimba por qual número o lead entrou (se ainda não tiver).
+  if (!lead.sessaoWhatsappId) {
+    await db.update(leads).set({ sessaoWhatsappId: sessao.id }).where(eq(leads.id, lead.id)).catch(() => {});
+    lead = { ...lead, sessaoWhatsappId: sessao.id };
+  }
+
+  // Lead já existia com nome-placeholder e agora temos o nome do perfil -> atualiza.
+  if (pushName && lead.nome !== pushName && /^(Contato |WhatsApp )/.test(lead.nome)) {
+    const [atualizado] = await db.update(leads).set({ nome: pushName }).where(eq(leads.id, lead.id)).returning();
+    if (atualizado) {
+      lead = atualizado;
+      io.to('imobiliaria:' + sessao.imobiliariaId).emit('lead:updated', atualizado);
+    }
+  }
+
+  // Foto de perfil do WhatsApp — busca uma vez (fire-and-forget) se o lead ainda não tem.
+  // A URL do WhatsApp expira, então baixa e guarda no MinIO (cai de volta na URL crua se o upload falhar).
+  if (!lead.fotoUrl && !fromMe) {
+    const leadId = lead.id, imobId = sessao.imobiliariaId, sn = sessao.sessionName, tel = numero;
+    void (async () => {
+      const urlWa = await fotoPerfil(sn, tel);
+      if (!urlWa) return;
+      let fotoUrl = urlWa;
+      try {
+        const img = await fetch(urlWa);
+        if (img.ok) {
+          const buf = Buffer.from(await img.arrayBuffer());
+          const ct = img.headers.get('content-type') || 'image/jpeg';
+          fotoUrl = await uploadFile(`perfis-wa/${leadId}.jpg`, buf, ct);
+        }
+      } catch { /* usa a URL crua do WhatsApp */ }
+      const [row] = await db.update(leads).set({ fotoUrl }).where(and(eq(leads.id, leadId), isNull(leads.fotoUrl))).returning();
+      if (row) io.to('imobiliaria:' + imobId).emit('lead:updated', row);
+    })().catch(() => {});
+  }
+
+  // SEMPRE baixa a mídia e sobe pro MinIO — a URL do WAHA (media.url) exige X-Api-Key,
+  // então o navegador não consegue abrir direto (img/audio/pdf davam 401).
+  let anexoUrl: string | null = null;
+  let anexoNome = m.anexoNome;
+  if (anexoTipo) {
+    const arq = await m.baixarMidia().catch(() => null);
+    if (arq) {
+      const ext = (arq.filename?.match(/\.[a-z0-9]{1,6}$/i)?.[0])
+        || ({ 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/opus': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'application/pdf': '.pdf' } as Record<string, string>)[arq.mimetype]
+        || '.bin';
+      const nomeArquivo = (anexoTipo === 'documento' && arq.filename) ? arq.filename : ((waId || String(Date.now())).replace(/[^a-z0-9]/gi, '').slice(-24) + ext);
+      anexoUrl = await uploadFile(`wa/${lead.id}/${nomeArquivo}`, arq.buffer, arq.mimetype).catch(() => null);
+      if (!anexoNome && anexoTipo === 'documento') anexoNome = arq.filename;
+    }
+  }
+
+  // Áudio do cliente num lead que o Agente de IA está atendendo: transcreve antes de gravar
+  // (a IA precisa do conteúdo, e a transcrição também aparece pro corretor no CRM).
+  const transcricao = !fromMe && anexoTipo === 'audio' && anexoUrl && lead.iaStatus === 'atendendo'
+    ? await transcreverAudio(sessao.imobiliariaId, anexoUrl)
+    : null;
+
+  const inseridas = await db.insert(mensagensWhatsapp).values({
+    leadId: lead.id,
+    direcao: fromMe ? 'out' : 'in',
+    canal: 'corretor',
+    waMessageId: waId ?? null,
+    waChave,
+    ackStatus: fromMe ? 2 : null,
+    enviadoPor: fromMe ? (sessao.corretorId ?? null) : null,
+    texto,
+    anexoUrl,
+    anexoTipo,
+    anexoNome,
+    transcricao,
+  }).onConflictDoNothing().returning(); // ON CONFLICT DO NOTHING (sem target — casa com o índice parcial)
+
+  const msg = inseridas[0];
+  if (!msg) return; // era duplicada (webhook 2x) — ignora em silêncio
+  io.to('imobiliaria:' + sessao.imobiliariaId).emit('mensagem:created', msg);
+
+  // lead respondeu -> pausa a régua de follow-up (o corretor assume)
+  if (!fromMe) void pausarPorResposta(io, sessao.imobiliariaId, lead.id);
+  if (!fromMe && lead.iaStatus === 'atendendo') void mensagemDoCliente(io, lead.id);
+  if (!fromMe && lead.iaStatus === 'transferido') void clienteAguardandoCorretor(io, lead, texto);
+
+  // mensagem RECEBIDA -> push pro corretor dono do lead (mesmo com o CRM fechado)
+  if (!fromMe && lead.corretorId) {
+    const previa = texto ? texto.slice(0, 80)
+      : anexoTipo === 'imagem' ? 'Enviou uma foto'
+      : anexoTipo === 'audio' ? 'Enviou um áudio'
+      : anexoTipo === 'video' ? 'Enviou um vídeo'
+      : anexoTipo ? 'Enviou um arquivo' : 'Nova mensagem';
+    enviarPush(lead.corretorId, {
+      title: lead.nome,
+      body: previa,
+      url: '/conversas',
+      tag: 'msg-' + lead.id,
+    }).catch(() => {});
+  }
+}
+
+/** Usado pelo chat e pelo follow-up: manda a mensagem pelo WhatsApp certo (central ou do corretor).
+ *  Número central híbrido: janela de 24h aberta → API oficial; fechada → WAHA. Devolve o id da
+ *  mensagem e a chave, que quem chamou grava (o eco que volta do WhatsApp é reconhecido por ela). */
 export async function despacharPeloWhatsapp(opts: {
   imobiliariaId: string;
+  leadId: string;
   telefone: string;
   corretorId: string | null;
   sessaoWhatsappId?: string | null;
@@ -413,32 +531,23 @@ export async function despacharPeloWhatsapp(opts: {
   anexoUrl?: string | null;
   anexoTipo?: 'imagem' | 'video' | 'documento' | 'audio' | null;
   anexoNome?: string | null;
-}): Promise<{ enviado: boolean; erro?: string }> {
-  if (!wahaConfigurado()) return { enviado: false, erro: 'WAHA não configurado' };
-  const { enviarTexto, enviarMidia } = await import('../lib/waha.js');
+}): Promise<{ enviado: boolean; erro?: string; waMessageId?: string | null; waChave?: string | null; via?: string }> {
   const [imob] = await db.select({ modo: imobiliarias.modoWhatsapp }).from(imobiliarias).where(eq(imobiliarias.id, opts.imobiliariaId)).limit(1);
 
-  let sessao;
+  let sessao: typeof sessoesWhatsapp.$inferSelect | null | undefined;
   if (imob?.modo === 'central') {
-    // Sai pelo MESMO número que o lead usou pra falar; se não souber / não estiver conectado, cai no 1º central conectado.
-    if (opts.sessaoWhatsappId) {
-      [sessao] = await db.select().from(sessoesWhatsapp)
-        .where(and(eq(sessoesWhatsapp.id, opts.sessaoWhatsappId), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
-    }
-    if (!sessao) {
-      [sessao] = await db.select().from(sessoesWhatsapp)
-        .where(and(eq(sessoesWhatsapp.imobiliariaId, opts.imobiliariaId), eq(sessoesWhatsapp.escopo, 'central'), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
-    }
+    // Sai pelo MESMO número que o lead usou pra falar; se não souber / não estiver no ar, cai no 1º central no ar.
+    sessao = await numeroCentralDoLead({ imobiliariaId: opts.imobiliariaId, sessaoWhatsappId: opts.sessaoWhatsappId ?? null });
   } else if (opts.corretorId) {
+    if (!wahaConfigurado()) return { enviado: false, erro: 'NAO_OFICIAL_INDISPONIVEL' };
     [sessao] = await db.select().from(sessoesWhatsapp)
       .where(and(eq(sessoesWhatsapp.corretorId, opts.corretorId), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
   }
   if (!sessao) return { enviado: false, erro: 'nenhuma sessão conectada' };
 
   try {
-    if (opts.anexoUrl && opts.anexoTipo) await enviarMidia(sessao.sessionName, opts.telefone, opts.anexoUrl, opts.anexoTipo, opts.texto ?? undefined, opts.anexoNome ?? undefined);
-    else if (opts.texto) await enviarTexto(sessao.sessionName, opts.telefone, opts.texto);
-    return { enviado: true };
+    const r = await enviarAoLead(sessao, { id: opts.leadId, telefone: opts.telefone }, opts);
+    return { enviado: true, waMessageId: r.id, waChave: r.chave, via: r.via };
   } catch (e) {
     return { enviado: false, erro: (e as Error).message };
   }

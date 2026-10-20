@@ -20,18 +20,27 @@ import { tagsRouter } from './routes/tags.js';
 import { configRouter } from './routes/config.js';
 import { integracoesRouter } from './routes/integracoes.js';
 import { whatsappRouter } from './routes/whatsapp.js';
+import { whatsappOficialRouter } from './routes/whatsappOficial.js';
+import { assistenteRouter } from './routes/assistente.js';
 import { plataformaRouter } from './routes/plataforma.js';
 import { pushRouter } from './routes/push.js';
 import { tarefasRouter } from './routes/tarefas.js';
 import { followupRouter } from './routes/followup.js';
 import { sitesRouter } from './routes/sites.js';
 import { roletasRouter } from './routes/roletas.js';
-import { relatoriosRouter } from './routes/relatorios.js';
+import { avisosCorretorRouter } from './routes/avisosCorretor.js';
+import { contatosWhatsappRouter } from './routes/contatosWhatsapp.js';
 import { verifyToken } from './lib/jwt.js';
 import { ensureBucket } from './lib/storage.js';
 import { bootstrapAdminPlataforma, varrerInadimplencia } from './lib/bootstrapPlataforma.js';
 import { varrerTarefasVencidas } from './lib/tarefas.js';
 import { varrerFollowups } from './lib/followup.js';
+import { varrerIa } from './lib/agenteIa.js';
+import { relatoriosRouter } from './routes/relatorios.js';
+import { importacoesRouter } from './routes/importacoes.js';
+import { agenteIaRouter } from './routes/agenteIa.js';
+import { facebookWebhookRouter } from './routes/facebookWebhook.js';
+import { verificarConexoesFacebook } from './lib/facebookSaude.js';
 
 const app = express();
 // O webhook do formulário de site é público (token na URL) e a página fica em domínio de
@@ -40,7 +49,10 @@ const corsPublico = cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], all
 const corsRestrito = cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' });
 const publico = (p: string) => p.startsWith('/api/captacao/site') || p.startsWith('/api/sites/publico');
 app.use((req, res, next) => (publico(req.path) ? corsPublico : corsRestrito)(req, res, next));
-app.use(express.json());
+// Webhook da Meta: guarda o corpo bruto pra conferir a assinatura (x-hub-signature-256).
+app.use(express.json({
+  verify: (req, _res, buf) => { if (/^\/api\/(webhooks\/facebook|whatsapp-oficial\/webhook)/.test((req as express.Request).originalUrl || '')) (req as unknown as { rawBody: Buffer }).rawBody = buf; },
+}));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -54,7 +66,6 @@ app.use('/api/notificacoes', notificacoesRouter);
 app.use('/api/integracoes', integracoesRouter);
 app.use('/api/plataforma', plataformaRouter);
 app.use('/api/push', pushRouter);
-app.use('/api/relatorios', relatoriosRouter);
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:5173' } });
@@ -84,9 +95,17 @@ app.use('/api/mensagens', mensagensRouter(io));
 app.use('/api/captacao', captacaoRouter(io));
 app.use('/api/tags', tagsRouter(io));
 app.use('/api/whatsapp', whatsappRouter(io));
+app.use('/api/whatsapp-oficial', whatsappOficialRouter(io));
+app.use('/api/assistente', assistenteRouter);
 app.use('/api/tarefas', tarefasRouter(io));
 app.use('/api/followup', followupRouter(io));
 app.use('/api/sites', sitesRouter(io));
+app.use('/api/avisos-corretor', avisosCorretorRouter());
+app.use('/api/contatos-whatsapp', contatosWhatsappRouter(io));
+app.use('/api/agente-ia', agenteIaRouter(io));
+app.use('/api/importacoes', importacoesRouter(io));
+app.use('/api/relatorios', relatoriosRouter());
+app.use('/api/webhooks/facebook', facebookWebhookRouter(io));
 
 const port = Number(process.env.PORT) || 3001;
 
@@ -101,9 +120,15 @@ setInterval(() => {
 const varrerMinuto = () => {
   varrerTarefasVencidas(io).catch(err => console.error('Tarefas: varredura falhou —', err.message));
   varrerFollowups(io).catch(err => console.error('Follow-up: varredura falhou —', err.message));
+  varrerIa(io).catch(err => console.error('Agente IA: varredura falhou —', err.message));
 };
 varrerMinuto();
 setInterval(varrerMinuto, 60 * 1000);
+
+// Conexões 'Conectar com Facebook': confere se as páginas continuam mandando leads (a cada 6 h).
+const vigiarFacebook = () => verificarConexoesFacebook().catch(err => console.error('Facebook: verificação falhou —', err.message));
+setTimeout(vigiarFacebook, 60 * 1000);
+setInterval(vigiarFacebook, 6 * 60 * 60 * 1000);
 
 ensureBucket()
   .catch(err => console.error('MinIO: não foi possível preparar o bucket —', err.message))

@@ -49,6 +49,9 @@ a:hover { color: var(--ink); }
 
 @keyframes pulse { 0%, 100% { opacity: .55; } 50% { opacity: .25; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes orbePulso { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes orbeGiro { to { transform: rotate(360deg); } }
+@media (max-width: 640px) { .botao-assistente-nome { display: none; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes dots { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 @keyframes slideInLeft { from { transform: translateX(-100%); } to { transform: none; } }

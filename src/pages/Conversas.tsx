@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Paperclip, Flag } from 'lucide-react';
+import { Paperclip } from 'lucide-react';
+import { TagChips } from '../components/CardTagBar';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { mapMsgs, type Lead } from '../lib/data';
@@ -11,6 +12,9 @@ import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from '../components/AnexoMensagem';
 import { AudioRecordButton } from '../components/AudioRecordButton';
 import { EmojiPicker } from '../components/EmojiPicker';
+import { ContatosPendentes, useContatosWhatsapp } from '../components/ContatosPendentes';
+import { apiFetch } from '../lib/api';
+import { AvisoJanelaOficial } from '../components/WhatsappOficial';
 
 export default function Conversas() {
   const allLeads = useAppStore(s => s.leads);
@@ -36,8 +40,36 @@ export default function Conversas() {
   const sendConv = useAppStore(s => s.sendConv);
   const openLead = useAppStore(s => s.openLead);
   const { isManager, meNome } = useRoleInfo();
+  const ask = useAppStore(s => s.ask);
+  const contatos = useContatosWhatsapp();
 
   const thread = (l: Lead) => chats[l.id] || [];
+
+  const acaoIa = async (l: Lead, acao: 'assumir' | 'passar') => {
+    try {
+      await apiFetch('/api/agente-ia/leads/' + l.id + '/' + acao, token, { method: 'POST' });
+      toast(acao === 'assumir' ? 'Pronto — a IA parou e a conversa é da equipe' : 'Lead enviado pra roleta');
+    } catch (e) {
+      toast((e as Error).message || 'Não foi possível');
+    }
+  };
+
+  const marcarPessoal = (l: Lead) => {
+    ask(
+      'Essa conversa é pessoal?',
+      l.nome + ' sai do CRM (o lead e a conversa são apagados) e esse número nunca mais é espelhado. Dá pra desfazer depois em "Números pessoais", mas o que foi apagado não volta.',
+      'É pessoal',
+      async () => {
+        try {
+          await apiFetch('/api/contatos-whatsapp/leads/' + l.id + '/pessoal', token, { method: 'POST' });
+          backToList();
+          toast('Conversa removida do CRM');
+        } catch (e) {
+          toast((e as Error).message || 'Não foi possível marcar como pessoal');
+        }
+      },
+    );
+  };
 
   // Conversas com dado real (10k+ leads na base): só listar quem já teve alguma mensagem de
   // verdade, não todo mundo — senão a lista fica enorme e inútil (maioria nunca falou pelo CRM).
@@ -45,13 +77,24 @@ export default function Conversas() {
 
   const q = (convQuery || '').trim().toLowerCase();
   const [convTag, setConvTag] = useState<string | null>(null);
+  // Várias caixas de entrada: rótulo do número por onde o lead fala + filtro por número.
+  const numerosCentrais = useAppStore(s => s.numerosCentrais);
+  const fetchNumerosCentrais = useAppStore(s => s.fetchNumerosCentrais);
+  useEffect(() => { fetchNumerosCentrais(); }, [fetchNumerosCentrais]);
+  const variosNumeros = numerosCentrais.length > 1;
+  const nomeNumero = (id?: string | null) => {
+    const n = id ? numerosCentrais.find(x => x.id === id) : undefined;
+    return n ? (n.rotulo || (n.numero ? '+' + n.numero : 'Número')) : null;
+  };
+  const [convNumero, setConvNumero] = useState('');
   const convBase = useMemo(() => allLeads
     .filter(l => conversaPorLead.has(l.id))
     .filter(l => (isManager ? (convCorretor === 'Todos os corretores' || l.corretor === convCorretor) : l.corretor === meNome))
     .filter(l => !convTag || l.tags.includes(convTag))
+    .filter(l => !convNumero || l.sessaoWhatsappId === convNumero)
     .filter(l => !q || l.nome.toLowerCase().includes(q) || (q.replace(/\D/g, '') !== '' && l.tel.replace(/\D/g, '').includes(q.replace(/\D/g, ''))))
     .sort((a, b) => new Date(conversaPorLead.get(b.id)!.enviadoEm).getTime() - new Date(conversaPorLead.get(a.id)!.enviadoEm).getTime()),
-    [allLeads, conversaPorLead, isManager, convCorretor, meNome, q, convTag]);
+    [allLeads, conversaPorLead, isManager, convCorretor, meNome, q, convTag, convNumero]);
 
   const CL = convBase.find(l => l.id === convId);
   const convThread = mapMsgs(CL ? thread(CL) : []);
@@ -86,6 +129,12 @@ export default function Conversas() {
                 {perfis.map(p => <option key={p.id}>{p.nome}</option>)}
               </select>
             )}
+            {variosNumeros && (
+              <select value={convNumero} onChange={e => setConvNumero(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13, boxSizing: 'border-box' }}>
+                <option value="">Todos os números</option>
+                {numerosCentrais.map(n => <option key={n.id} value={n.id}>{n.rotulo || (n.numero ? '+' + n.numero : 'Número')}</option>)}
+              </select>
+            )}
             {tags.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                 {tags.map(t => {
@@ -106,6 +155,7 @@ export default function Conversas() {
             )}
           </div>
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            <ContatosPendentes {...contatos} />
             {convBase.map(l => {
               const resumo = conversaPorLead.get(l.id);
               const legendaAnexo = resumo?.anexoTipo === 'imagem' ? 'Foto' : resumo?.anexoTipo === 'video' ? 'Vídeo' : resumo?.anexoTipo === 'documento' ? 'Documento' : resumo?.anexoTipo === 'audio' ? 'Áudio' : resumo?.texto;
@@ -123,13 +173,16 @@ export default function Conversas() {
                   <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
-                      {(() => {
-                        const minhas = tags.filter(t => l.tags.includes(t.id));
-                        return minhas.slice(0, 3).map(t => <Flag key={t.id} size={12} strokeWidth={0} fill={t.cor} color={t.cor} style={{ flex: 'none' }} />);
-                      })()}
                       <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{diasMsg === 0 ? horaMsg : dayLabel(diasMsg) + ' ' + horaMsg}</span>
                     </span>
+                    {l.tags.length > 0 && <TagChips tags={tags.filter(t => l.tags.includes(t.id))} max={2} style={{ marginTop: 4 }} />}
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      {l.iaStatus === 'atendendo' && (
+                        <span style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', padding: '1px 5px', borderRadius: 4, color: '#fff', background: '#0F5E57' }}>IA</span>
+                      )}
+                      {variosNumeros && nomeNumero(l.sessaoWhatsappId) && (
+                        <span title="Número por onde o lead fala" style={{ flex: 'none', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 700, padding: '1px 5px', borderRadius: 4, color: 'var(--ink)', border: '1px solid var(--line)' }}>{nomeNumero(l.sessaoWhatsappId)}</span>
+                      )}
                       <span style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '1px 5px', borderRadius: 4, color: l.canal === 'WhatsApp' ? 'var(--olive)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terra)' : 'var(--muted)', background: l.canal === 'WhatsApp' ? 'var(--oliveSoft)' : (l.canal === 'Instagram' || l.canal === 'Facebook') ? 'var(--terraSoft)' : 'var(--line)' }}>{l.canal}</span>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: (resumo?.naoLidas ?? 0) > 0 ? 'var(--ink)' : 'var(--muted)', fontWeight: (resumo?.naoLidas ?? 0) > 0 ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(resumo?.direcao === 'out' ? 'Você: ' : '') + legendaAnexo}</span>
                       {(resumo?.naoLidas ?? 0) > 0 && (
@@ -158,10 +211,23 @@ export default function Conversas() {
                   <ChatAvatar nome={CL.nome} foto={CL.foto} size={38} />
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'block', fontSize: 14.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CL.nome}</span>
-                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{CL.imovel} · {CL.corretor}</span>
+                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{CL.imovel} · {CL.corretor}{variosNumeros && nomeNumero(CL.sessaoWhatsappId) ? ' · pelo número ' + nomeNumero(CL.sessaoWhatsappId) : ''}</span>
+                    {CL.tags.length > 0 && <TagChips tags={tags.filter(t => CL.tags.includes(t.id))} style={{ marginTop: 4 }} />}
                   </span>
                 </button>
                 <span style={css(canalPill(CL.canal))}>{CL.canal}</span>
+                {CL.iaStatus === 'atendendo' && (
+                  <span style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: '#0F5E57', color: '#fff', whiteSpace: 'nowrap' }}>IA atendendo</span>
+                )}
+                {isManager && CL.iaStatus === 'atendendo' && (
+                  <button onClick={() => acaoIa(CL, 'assumir')} title="A IA para e a equipe assume a conversa" style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Assumir</button>
+                )}
+                {isManager && !CL.corretor && (CL.iaStatus === 'atendendo' || CL.iaStatus === 'pausado') && (
+                  <button onClick={() => acaoIa(CL, 'passar')} title="Encerra a IA e manda o lead pra roleta agora" style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Passar pra roleta</button>
+                )}
+                {contatos.espelho && CL.canal === 'WhatsApp' && CL.corretor === meNome && (
+                  <button onClick={() => marcarPessoal(CL)} title="Tirar essa conversa do CRM (é pessoal)" style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', color: 'var(--muted)' }}>Conversa pessoal</button>
+                )}
                 <button onClick={() => openLead(CL.id, 'chat')} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Ver lead</button>
               </div>
               <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -177,7 +243,9 @@ export default function Conversas() {
                     <div style={css(m.rowStyle)}>
                       <span style={css(m.bubbleStyle)}>
                         {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Follow-up automático</span>}
+                        {m.ia && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Agente de IA</span>}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFim} />}
+                        {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
                         {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
                       </span>
@@ -195,6 +263,7 @@ export default function Conversas() {
                 
               </div>
               <div style={{ borderTop: '1px solid var(--line)', padding: '14px 18px', position: 'relative', background: 'var(--card)', flex: 'none' }}>
+                <AvisoJanelaOficial leadId={CL.id} qtdMensagens={convThread.length} />
                 {slashQ !== null && slashItems.length > 0 && (
                   <div style={{ position: 'absolute', left: 18, right: 18, bottom: 64, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,27,26,.14)' }}>
                     <p style={{ fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '6px 10px 8px' }}>Templates rápidos</p>

@@ -1,0 +1,1 @@
+ALTER TABLE "assistente_sessoes" ADD COLUMN "transcricao" jsonb DEFAULT '[]'::jsonb NOT NULL;

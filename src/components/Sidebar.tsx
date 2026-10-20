@@ -21,8 +21,15 @@ export function Sidebar() {
   const nav = useNavigate();
   const location = useLocation();
 
+  const modoWhatsapp = useAppStore(s => s.modoWhatsapp);
   const menuItems = NAV_ITEMS.filter(it => it.group === 'menu');
-  const toolItems = NAV_ITEMS.filter(it => it.group === 'ferramentas' && (!it.mgrOnly || isManager));
+  const toolItems = NAV_ITEMS.filter(it => {
+    if (it.group !== 'ferramentas') return false;
+    if (it.mgrOnly && !isManager) return false;
+    // Integrações: corretor só vê pra conectar o próprio número, e só no modo "WhatsApp de cada corretor"
+    if (it.path === '/integracoes' && !isManager && modoWhatsapp !== 'corretor') return false;
+    return true;
+  });
 
   const badgeFor = (path: string) => (path === '/conversas' ? unread : path === '/rebatidas' ? rebatidas : 0);
 
@@ -43,7 +50,7 @@ export function Sidebar() {
         style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', border: 'none', borderRadius: 8,
           fontSize: 13.5, fontWeight: isActive ? 700 : 500, textAlign: 'left',
-          background: isActive ? 'rgba(76,141,240,.16)' : 'transparent',
+          background: isActive ? 'rgba(201,124,70,.16)' : 'transparent',
           color: isActive ? 'var(--side-accent)' : 'var(--sideMuted)', width: '100%', flex: 'none',
         }}
       >

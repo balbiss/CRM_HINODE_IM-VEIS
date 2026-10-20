@@ -1,0 +1,1 @@
+ALTER TABLE "agentes_ia" ADD COLUMN "despedida_modo" text DEFAULT 'ia' NOT NULL;

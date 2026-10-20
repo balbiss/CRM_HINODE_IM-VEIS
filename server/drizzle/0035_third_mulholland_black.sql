@@ -1,0 +1,1 @@
+ALTER TABLE "imoveis" ADD COLUMN "nomes_campanha" jsonb DEFAULT '[]'::jsonb NOT NULL;

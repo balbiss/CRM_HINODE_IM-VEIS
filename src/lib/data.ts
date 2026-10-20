@@ -89,8 +89,14 @@ export interface Lead {
   motivo: string;
   renda: number;
   entrouNaColunaEm?: string;
+  /** Quando o lead entrou no CRM (ISO). */
   criadoEm?: string;
   tags: string[];
+  /** Agente de IA: 'atendendo' | 'transferido' | 'pausado' | '' (nunca passou pela IA). */
+  iaStatus?: string;
+  iaResumo?: string;
+  /** Número central (sessão WhatsApp) por onde o lead fala com a imobiliária. */
+  sessaoWhatsappId?: string | null;
 }
 
 export function buildLeads(): Lead[] {
@@ -129,17 +135,21 @@ export interface ChatMsg {
   texto: string;
   hora: string;
   bot?: boolean;
+  ia?: boolean;
   off?: number;
   anexoUrl?: string | null;
   anexoTipo?: AnexoTipo | null;
   anexoNome?: string | null;
   /** "visto" do WhatsApp: 1 enviando, 2 servidor, 3 entregue, 4 lido, 5 reproduzido. */
   ack?: number;
+  /** Áudio transcrito (quando o Agente de IA estava atendendo). */
+  transcricao?: string | null;
 }
 
 export interface MappedMsg {
-  id: string; texto: string; hora: string; stamp: string; sep: boolean; sepLabel: string; bot: boolean;
+  id: string; texto: string; hora: string; stamp: string; sep: boolean; sepLabel: string; bot: boolean; ia: boolean;
   rowStyle: string; bubbleStyle: string; anexoUrl?: string | null; anexoTipo?: AnexoTipo | null; anexoNome?: string | null;
+  transcricao?: string | null;
   /** "visto" só nas mensagens enviadas: '' | '✓' (enviada) | '✓✓' (entregue) | '✓✓ azul' (lida). */
   visto: '' | 'enviado' | 'entregue' | 'lido';
 }
@@ -154,11 +164,11 @@ export function mapMsgs(arr: ChatMsg[]): MappedMsg[] {
     const visto: MappedMsg['visto'] = m.side !== 'out' ? ''
       : (m.ack ?? 0) >= 4 ? 'lido' : (m.ack ?? 0) === 3 ? 'entregue' : 'enviado';
     return {
-      id: m.id, texto: m.texto, hora: m.hora, stamp: stamp(off, m.hora), sep, sepLabel: lab, bot: !!m.bot,
-      anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo, anexoNome: m.anexoNome, visto,
+      id: m.id, texto: m.texto, hora: m.hora, stamp: stamp(off, m.hora), sep, sepLabel: lab, bot: !!m.bot, ia: !!m.ia,
+      anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo, anexoNome: m.anexoNome, visto, transcricao: m.transcricao,
       rowStyle: 'display:flex;justify-content:' + (m.side === 'out' ? 'flex-end' : 'flex-start'),
       bubbleStyle: 'max-width:72%;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;' +
-        (m.bot ? 'background:#4B3B7A;color:#fff' : m.side === 'out' ? 'background:var(--terra);color:#fff' : 'background:var(--bg);border:1px solid var(--line)'),
+        (m.bot ? 'background:#4B3B7A;color:#fff' : m.ia ? 'background:#0F5E57;color:#fff' : m.side === 'out' ? 'background:var(--terra);color:#fff' : 'background:var(--bg);border:1px solid var(--line)'),
     };
   });
 }

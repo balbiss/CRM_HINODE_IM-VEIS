@@ -61,6 +61,9 @@ export default function Bolsao() {
   const rebatidasGeral = filtrados.filter(l => l.col === 'rebatida' && !MOTIVOS_EXTREMOS.includes(l.motivo));
   const descadastrar = filtrados.filter(l => l.col === 'rebatida' && MOTIVOS_EXTREMOS.includes(l.motivo));
   const roletaLog = useAppStore(s => s.roletaLog);
+  const [soRecusas, setSoRecusas] = useState(false);
+  const logVisivel = soRecusas ? roletaLog.filter(r => r.tipo === 'recusa') : roletaLog;
+  const ORIGEM: Record<string, string> = { roleta: 'Roleta automática', importacao: 'Planilha', 'rebatida-puxada': 'Puxou do bolsão' };
   const fetchRoletaLog = useAppStore(s => s.fetchRoletaLog);
   useEffect(() => { fetchRoletaLog(); }, [fetchRoletaLog]);
 
@@ -269,23 +272,37 @@ export default function Bolsao() {
       )}
 
       {bTab === 'roletalog' && (
+        <>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {([[false, 'Tudo'], [true, 'Só recusas']] as const).map(([v, t]) => (
+            <button key={t} onClick={() => setSoRecusas(v)} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1px solid ' + (soRecusas === v ? 'var(--terra)' : 'var(--line)'), background: soRecusas === v ? 'var(--terraSoft)' : 'var(--card)', color: soRecusas === v ? 'var(--terra)' : 'var(--muted)' }}>{t}</button>
+          ))}
+        </div>
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
           <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-            <span style={{ width: 130 }}>Data / hora</span><span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Recebido por</span><span style={{ width: 170 }}>Origem</span>
+            <span style={{ width: 130 }}>Data / hora</span><span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Corretor</span><span style={{ width: 200 }}>O que aconteceu</span>
           </div>
-          {roletaLog.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhuma distribuição registrada ainda.</p></div>}
-          {roletaLog.map((r, i) => {
+          {logVisivel.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>{soRecusas ? 'Nenhuma recusa registrada.' : 'Nenhuma distribuição registrada ainda.'}</p></div>}
+          {logVisivel.map((r, i) => {
             const dt = new Date(r.criadoEm);
             return (
               <div key={i} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
                 <span style={{ width: 130, fontSize: 12.5, color: 'var(--muted)' }}>{dt.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} · {dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                 <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{r.leadNome}</span>
                 <span style={{ flex: 1, fontSize: 13 }}>{r.corretorNome}</span>
-                <span style={{ width: 170 }}><span style={css(PILL + 'background:var(--oliveSoft);color:var(--olive)')}>{r.origem === 'roleta' ? 'Roleta automática' : r.origem}</span></span>
+                <span style={{ width: 200 }}>
+                  {r.tipo === 'recusa'
+                    ? <>
+                        <span style={css(PILL + 'background:var(--terraSoft);color:var(--terra)')}>{r.origem === 'sem_resposta' ? 'Não respondeu a tempo' : 'Recusou'}</span>
+                        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{r.paraNome ? 'foi para ' + r.paraNome : 'ficou sem corretor'}</span>
+                      </>
+                    : <span style={css(PILL + 'background:var(--oliveSoft);color:var(--olive)')}>{ORIGEM[r.origem] ?? r.origem}</span>}
+                </span>
               </div>
             );
           })}
         </div>
+        </>
       )}
     </div>
   );

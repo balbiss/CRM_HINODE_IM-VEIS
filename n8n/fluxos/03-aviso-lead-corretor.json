@@ -1,0 +1,196 @@
+{
+  "name": "CRM HINODE — AVISO DE LEAD AO CORRETOR",
+  "nodes": [
+    {
+      "id": "nota-e08p5sqm",
+      "name": "Leia-me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        -330
+      ],
+      "parameters": {
+        "content": "## Aviso de lead ao corretor\nChamado pela roleta do CRM (lib/roleta.ts) quando a imobiliária usa \"Avisar o corretor por WhatsApp\". Manda a mensagem pro celular do corretor pelo número central (sessão WAHA imob-<imobiliariaId>) e reporta o resultado pro CRM (aba \"Avisos por WhatsApp\").\n\nTrocar __SEGREDO_AVISO_CORRETOR__, __SEGREDO_RESULTADO_AVISO__, __URL_WAHA__ e __URL_API_CRM__. Credencial: \"WAHA (X-Api-Key)\".",
+        "width": 660,
+        "height": 280,
+        "color": 4
+      }
+    },
+    {
+      "id": "v1",
+      "name": "Receber Aviso de Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hinode-aviso-corretor",
+        "options": {
+          "onlyRunIf": "={{ $json.query.secret === \"__SEGREDO_AVISO_CORRETOR__\" }}"
+        }
+      }
+    },
+    {
+      "id": "v2",
+      "name": "Preparar Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "corretorTelefone",
+              "name": "corretorTelefone",
+              "type": "string",
+              "value": "={{ $json.body.corretorTelefone }}"
+            },
+            {
+              "id": "mensagem",
+              "name": "mensagem",
+              "type": "string",
+              "value": "={{ \"Olá, \" + $json.body.corretorNome.split(\" \")[0] + \"! *Novo lead atribuído a você*\\n\\n*Nome:* \" + $json.body.lead.nome + \"\\n*WhatsApp:* \" + $json.body.lead.telefone + ($json.body.lead.email ? \"\\n*E-mail:* \" + $json.body.lead.email : \"\") + \"\\n*Canal:* \" + $json.body.lead.canal + ($json.body.lead.campanha ? \"\\n*Campanha:* \" + $json.body.lead.campanha : \"\") + \"\\n\\nEntre em contato o quanto antes para não perder a oportunidade.\\n\\n_Mensagem automática — CRM Hinode Imóveis_\" }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "v3",
+      "name": "Checar Número (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=__URL_WAHA__/api/contacts/check-exists?phone={{ $json.corretorTelefone.replace(/\\D/g, \"\") }}&session={{ $('Receber Aviso de Lead').item.json.body.sessionName || ('imob-' + $('Receber Aviso de Lead').item.json.body.imobiliariaId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WAHA (X-Api-Key)"
+        }
+      }
+    },
+    {
+      "id": "v4",
+      "name": "Enviar WhatsApp (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__URL_WAHA__/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"session\": $('Receber Aviso de Lead').item.json.body.sessionName || (\"imob-\" + $('Receber Aviso de Lead').item.json.body.imobiliariaId), \"chatId\": $json.chatId, \"text\": $('Preparar Mensagem').item.json.mensagem } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WAHA (X-Api-Key)"
+        }
+      }
+    },
+    {
+      "id": "v5",
+      "name": "Reportar Resultado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__URL_API_CRM__/api/avisos-corretor/resultado?secret=__SEGREDO_RESULTADO_AVISO__",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"imobiliariaId\": $('Receber Aviso de Lead').item.json.body.imobiliariaId, \"leadId\": $('Receber Aviso de Lead').item.json.body.leadId, \"leadNome\": $('Receber Aviso de Lead').item.json.body.lead.nome, \"corretorId\": $('Receber Aviso de Lead').item.json.body.corretorId, \"corretorNome\": $('Receber Aviso de Lead').item.json.body.corretorNome, \"sucesso\": $json.statusCode < 300, \"erro\": ($json.statusCode < 300 ? null : JSON.stringify($json.body)) } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Receber Aviso de Lead": {
+      "main": [
+        [
+          {
+            "node": "Preparar Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Checar Número (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar Número (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

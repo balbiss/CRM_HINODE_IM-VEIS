@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, imobiliarias, notificacoes, imoveis } from '../db/schema.js';
+import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, recusasLead, imobiliarias, notificacoes, imoveis } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { distribuirLead } from '../lib/roleta.js';
 import { registrarEvento } from '../lib/eventos.js';
@@ -17,9 +17,10 @@ export function leadsRouter(io: SocketServer) {
   // Corretor only ever sees their own leads; dono/gerente see everyone's in the imobiliária.
   router.get('/', async (req, res) => {
     const { imobiliariaId, role, sub } = req.auth!;
+    // lead guardado de planilha (importacaoPendente) não aparece: fica na tela de Importações
     const scoped = role === 'corretor'
-      ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
-      : eq(leads.imobiliariaId, imobiliariaId);
+      ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub), eq(leads.importacaoPendente, false))
+      : and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.importacaoPendente, false));
     const rows = await db.select().from(leads).where(scoped);
     // etiquetas de cada lead (mesmo escopo — join por lead_id)
     const vinculos = await db.select({ leadId: leadTags.leadId, tagId: leadTags.tagId })
@@ -123,14 +124,21 @@ export function leadsRouter(io: SocketServer) {
       ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
       : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
 
-    const [antes] = await db.select({ corretorId: leads.corretorId, motivoDescarte: leads.motivoDescarte })
+    const [antes] = await db.select({ corretorId: leads.corretorId, motivoDescarte: leads.motivoDescarte, iaStatus: leads.iaStatus })
       .from(leads).where(scoped).limit(1);
     const { rendaDeclarada, ...rest } = parsed.data;
+    // Atribuir ou descartar na mão tira o lead das mãos do Agente de IA.
+    const tiraDaIa = antes?.iaStatus === 'atendendo' && (!!rest.corretorId || !!rest.motivoDescarte);
     const [row] = await db.update(leads)
-      .set({ ...rest, ...(rendaDeclarada != null ? { rendaDeclarada: rendaDeclarada.toString() } : {}) })
+      .set({
+        ...rest,
+        ...(rendaDeclarada != null ? { rendaDeclarada: rendaDeclarada.toString() } : {}),
+        ...(tiraDaIa ? { iaStatus: 'pausado' as const, iaAguardandoDesde: null } : {}),
+      })
       .where(scoped)
       .returning();
     if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
+    if (tiraDaIa) registrarEvento(imobiliariaId, row.id, 'ia', 'Agente de IA pausado: o lead foi ' + (rest.motivoDescarte ? 'descartado' : 'atribuído') + ' manualmente', nome);
     if (rest.corretorId !== undefined && rest.corretorId !== antes?.corretorId) {
       if (rest.corretorId) {
         const [c] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, rest.corretorId)).limit(1);
@@ -159,6 +167,8 @@ export function leadsRouter(io: SocketServer) {
   // Corretor recusa um lead que caiu pra ele — volta pra roleta (ele vai pro fim da fila).
   router.post('/:id/recusar', async (req, res) => {
     const { imobiliariaId, sub, nome } = req.auth!;
+    // porTempo = o corretor não respondeu o popup a tempo (o front recusa sozinho)
+    const porTempo = req.body?.porTempo === true;
     const [lead] = await db.select().from(leads)
       .where(and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))).limit(1);
     if (!lead) return res.status(404).json({ error: 'Lead não encontrado ou não é seu' });
@@ -167,10 +177,14 @@ export function leadsRouter(io: SocketServer) {
     // quem recusou vai pro fim: marca ultimaAtribuicao como agora
     await db.update(filasAtendimento).set({ ultimaAtribuicao: new Date() }).where(eq(filasAtendimento.corretorId, sub));
     io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', { ...lead, corretorId: null });
-    registrarEvento(imobiliariaId, lead.id, 'recusa', 'Lead recusado por ' + nome + ' — devolvido à roleta', nome);
+    registrarEvento(imobiliariaId, lead.id, 'recusa', porTempo
+      ? nome + ' não respondeu ao lead a tempo — devolvido à roleta'
+      : 'Lead recusado por ' + nome + ' — devolvido à roleta', nome);
+    const [recusa] = await db.insert(recusasLead).values({ imobiliariaId, leadId: lead.id, corretorId: sub, motivo: porTempo ? 'sem_resposta' : 'recusou' }).returning();
     await encerrarPorLead(io, imobiliariaId, lead.id, 'lead recusado');
 
     const novoCorretor = await distribuirLead(io, imobiliariaId, lead.id);
+    if (novoCorretor) await db.update(recusasLead).set({ redistribuidoParaId: novoCorretor }).where(eq(recusasLead.id, recusa.id));
     res.json({ ok: true, redistribuido: !!novoCorretor });
   });
 

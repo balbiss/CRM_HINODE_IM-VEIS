@@ -1,0 +1,307 @@
+{
+  "name": "CRM HINODE — AGENTE DE IA: TRANSCREVER ÁUDIO",
+  "nodes": [
+    {
+      "id": "nota-rxadcjyl",
+      "name": "Leia-me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -300
+      ],
+      "parameters": {
+        "content": "## Transcrever áudio\nChamado pelo CRM quando o cliente manda áudio num lead que a IA está atendendo. Recebe { audioUrl, openaiKey|null }, baixa o áudio (URL pública do MinIO), transcreve e devolve { ok, texto, erro }.\n\nTrocar __SEGREDO_AGENTE_IA__ (mesmo segredo do agente). Credencial: \"OpenAI (chave do SaaS)\".",
+        "width": 600,
+        "height": 230,
+        "color": 4
+      }
+    },
+    {
+      "id": "t1",
+      "name": "Receber Áudio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hinode-transcrever-audio",
+        "responseMode": "responseNode",
+        "options": {
+          "onlyRunIf": "={{ $json.headers[\"x-agente-secret\"] === \"__SEGREDO_AGENTE_IA__\" }}"
+        }
+      }
+    },
+    {
+      "id": "t2",
+      "name": "Baixar Áudio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.body.audioUrl }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "t3",
+      "name": "Ajustar Nome do Arquivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// A OpenAI identifica o formato pela extensão; o n8n chama ogg/opus de \"oga\", que ela recusa.\nconst item = $input.first();\nconst bin = item.binary && item.binary.data;\nif (bin) {\n  let ext = String(bin.fileExtension || '').toLowerCase();\n  if (!ext || ext === 'oga' || ext === 'opus') ext = 'ogg';\n  bin.fileExtension = ext;\n  bin.fileName = 'audio.' + ext;\n  if (ext === 'ogg') bin.mimeType = 'audio/ogg';\n}\nreturn [item];"
+      }
+    },
+    {
+      "id": "t4",
+      "name": "Chave Própria?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Receber Áudio').item.json.body.openaiKey }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "t5",
+      "name": "Transcrever (Chave da Imobiliária)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        920,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Receber Áudio').item.json.body.openaiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "model",
+              "value": "gpt-4o-mini-transcribe"
+            },
+            {
+              "parameterType": "formData",
+              "name": "language",
+              "value": "pt"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "t6",
+      "name": "Transcrever (Chave do SaaS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        920,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "model",
+              "value": "gpt-4o-mini-transcribe"
+            },
+            {
+              "parameterType": "formData",
+              "name": "language",
+              "value": "pt"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI (chave do SaaS)"
+        }
+      }
+    },
+    {
+      "id": "t7",
+      "name": "Devolver Texto",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1160,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: !!$json.text, texto: $json.text || '', erro: $json.error ? $json.error.message : null } }}"
+      }
+    }
+  ],
+  "connections": {
+    "Receber Áudio": {
+      "main": [
+        [
+          {
+            "node": "Baixar Áudio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar Áudio": {
+      "main": [
+        [
+          {
+            "node": "Ajustar Nome do Arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajustar Nome do Arquivo": {
+      "main": [
+        [
+          {
+            "node": "Chave Própria?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chave Própria?": {
+      "main": [
+        [
+          {
+            "node": "Transcrever (Chave da Imobiliária)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transcrever (Chave do SaaS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcrever (Chave da Imobiliária)": {
+      "main": [
+        [
+          {
+            "node": "Devolver Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcrever (Chave do SaaS)": {
+      "main": [
+        [
+          {
+            "node": "Devolver Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

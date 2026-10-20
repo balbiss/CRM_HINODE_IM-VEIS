@@ -197,6 +197,42 @@ function DetalheModal({ id, onClose }: { id: string; onClose: () => void }) {
           </section>
 
           <section>
+            <h3 style={sec}>Agente de IA</h3>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, marginBottom: 10 }}>
+              <input type="checkbox" checked={d.iaLiberada} onChange={e => st.editar(id, { iaLiberada: e.target.checked }).then(recarregar).catch(err => setErro((err as Error).message))} />
+              Liberado pra esta imobiliária
+            </label>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, marginBottom: 10, opacity: d.iaLiberada ? 1 : 0.5 }}>
+              <label style={{ display: 'flex', gap: 6 }}>
+                <input type="radio" disabled={!d.iaLiberada} checked={d.iaUsaChaveSaas} onChange={() => st.editar(id, { iaUsaChaveSaas: true }).then(recarregar)} />
+                Usa a chave do SaaS (você cobra a mais)
+              </label>
+              <label style={{ display: 'flex', gap: 6 }}>
+                <input type="radio" disabled={!d.iaLiberada} checked={!d.iaUsaChaveSaas} onChange={() => st.editar(id, { iaUsaChaveSaas: false }).then(recarregar)} />
+                A imobiliária usa a própria chave
+              </label>
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>
+              Este mês: <b>{d.iaMes.atendimentos}</b> leads atendidos pela IA · {d.iaMes.turnos} respostas
+              {d.iaMes.tokensSaas > 0 && <> · <b>{d.iaMes.tokensSaas.toLocaleString('pt-BR')}</b> tokens na chave do SaaS</>}
+            </p>
+          </section>
+
+          <section>
+            <h3 style={sec}>Assistente de voz</h3>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, marginBottom: 10 }}>
+              <input type="checkbox" checked={d.assistenteLiberado} onChange={e => st.editar(id, { assistenteLiberado: e.target.checked }).then(recarregar).catch(err => setErro((err as Error).message))} />
+              Liberado pra esta imobiliária
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, opacity: d.assistenteLiberado ? 1 : 0.5 }}>
+              <label style={{ ...lbl, margin: 0 }}>Minutos por mês</label>
+              <input style={{ ...inp, width: 110 }} type="number" min={0} disabled={!d.assistenteLiberado} defaultValue={d.assistenteMinutosMes} key={d.assistenteMinutosMes}
+                onBlur={e => { const v = Math.max(0, Math.round(Number(e.target.value) || 0)); if (v !== d.assistenteMinutosMes) st.editar(id, { assistenteMinutosMes: v }).then(recarregar).catch(err => setErro((err as Error).message)); }} />
+              <span style={{ color: 'var(--muted)' }}>Este mês: <b>{d.assistenteMinutosUsados}</b> de {d.assistenteMinutosMes} min (≈ R$ 0,15 por minuto de conversa)</span>
+            </div>
+          </section>
+
+          <section>
             <h3 style={sec}>Registrar pagamento</h3>
             <form onSubmit={registrar} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, alignItems: 'end' }}>
               <div><label style={lbl}>Valor (R$)</label><input style={inp} type="number" min="0" step="0.01" value={pg.valor} onChange={e => setPg(p => ({ ...p, valor: e.target.value }))} required /></div>
