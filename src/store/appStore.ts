@@ -120,15 +120,19 @@ export interface ConfirmState { titulo: string; texto: string; ok: string; fn: (
 
 // Régua de follow-up (backend real). Cada corretor monta quantas quiser; a que estiver marcada
 // como "dispara em lead novo" começa sozinha quando um lead cai pra ele.
-export type PassoTipo = 'texto' | 'audio' | 'imagem' | 'pdf';
+export type PassoTipo = 'texto' | 'audio' | 'imagem' | 'video' | 'pdf';
+/** Quando o passo sai (v1): 'inscricao' = na hora (1º passo); 'proxima_leva'; 'passo_anterior' + N dias. */
+export type BaseAtraso = 'inscricao' | 'passo_anterior' | 'proxima_leva';
 export interface RemotePassoFluxo {
   tipo: PassoTipo; conteudo: string; atrasoMinutos: number; atrasoTexto: string;
   cadenciaLabel: string | null; anexoUrl: string | null; anexoNome: string | null;
+  baseAtraso?: BaseAtraso; soHorarioComercial?: boolean;
 }
 export interface RemoteFluxo {
   id: string; corretorId: string | null; nome: string; ativo: boolean; disparaEmLeadNovo: boolean;
   janelaInicioMin: number; janelaFimMin: number; janelaDias: boolean[];
   aoEsgotar: 'nada' | 'descartar' | 'mover'; aoEsgotarColunaId: string | null;
+  motivoDescarteEsgotar?: string; campanha?: string | null; arquivadoEm?: string | null; ativoNaV1?: boolean | null;
   passos: RemotePassoFluxo[];
 }
 export interface RemoteExecucao {
@@ -323,7 +327,12 @@ interface AppState {
 
   fetchFollowup: () => Promise<void>;
   criarFluxo: (nome: string, corretorId?: string) => Promise<RemoteFluxo | null>;
-  atualizarFluxo: (id: string, patch: Partial<Pick<RemoteFluxo, 'nome' | 'ativo' | 'disparaEmLeadNovo' | 'janelaInicioMin' | 'janelaFimMin' | 'janelaDias' | 'aoEsgotar' | 'aoEsgotarColunaId'>>) => Promise<void>;
+  atualizarFluxo: (id: string, patch: Partial<Pick<RemoteFluxo, 'nome' | 'ativo' | 'disparaEmLeadNovo' | 'janelaInicioMin' | 'janelaFimMin' | 'janelaDias' | 'aoEsgotar' | 'aoEsgotarColunaId' | 'motivoDescarteEsgotar' | 'campanha'>> & { arquivado?: boolean }) => Promise<void>;
+  copiarFluxo: (id: string) => Promise<RemoteFluxo | null>;
+  fluxosArquivados: RemoteFluxo[];
+  fetchFluxosArquivados: () => Promise<void>;
+  followupAutomaticoAtivo: boolean;
+  setFollowupAutomatico: (v: boolean) => Promise<void>;
   salvarPassos: (fluxoId: string, passos: RemotePassoFluxo[]) => Promise<void>;
   excluirFluxo: (id: string) => Promise<void>;
   iniciarFollowupLead: (leadId: string, fluxoId: string) => Promise<boolean>;
@@ -1490,12 +1499,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     const token = get().token;
     if (!token) return;
     try {
-      const [fluxos, execucoesFollowup] = await Promise.all([
+      const [fluxos, execucoesFollowup, cfg] = await Promise.all([
         apiFetch<RemoteFluxo[]>('/api/followup/fluxos', token),
         apiFetch<RemoteExecucao[]>('/api/followup/execucoes', token),
+        apiFetch<{ followupAutomaticoAtivo: boolean }>('/api/followup/config', token),
       ]);
-      set({ fluxos, execucoesFollowup });
+      set({ fluxos, execucoesFollowup, followupAutomaticoAtivo: cfg.followupAutomaticoAtivo });
     } catch { /* silencioso */ }
+  },
+  fluxosArquivados: [],
+  fetchFluxosArquivados: async () => {
+    const token = get().token;
+    if (!token) return;
+    try { set({ fluxosArquivados: await apiFetch<RemoteFluxo[]>('/api/followup/fluxos?arquivados=1', token) }); } catch { /* */ }
+  },
+  copiarFluxo: async id => {
+    const token = get().token;
+    if (!token) return null;
+    try {
+      const f = await apiFetch<RemoteFluxo>('/api/followup/fluxos/' + id + '/copiar', token, { method: 'POST' });
+      set(s => ({ fluxos: [...s.fluxos, f] }));
+      get().toast('Cópia criada (desativada) — ajuste o texto e ative');
+      return f;
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível copiar');
+      return null;
+    }
+  },
+  followupAutomaticoAtivo: false,
+  setFollowupAutomatico: async v => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      await apiFetch('/api/followup/config', token, { method: 'PUT', body: JSON.stringify({ followupAutomaticoAtivo: v }) });
+      set({ followupAutomaticoAtivo: v });
+      get().toast(v ? 'Follow-up automático LIGADO pra imobiliária' : 'Follow-up automático desligado');
+    } catch (e) { get().toast((e as ApiError).message || 'Só o dono pode mudar isso'); }
   },
   criarFluxo: async (nome, corretorId) => {
     const token = get().token;
@@ -1518,6 +1557,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const row = await apiFetch<RemoteFluxo>('/api/followup/fluxos/' + id, token, { method: 'PATCH', body: JSON.stringify(patch) });
       set(s => ({ fluxos: s.fluxos.map(f => (f.id === id ? { ...f, ...row } : f)) }));
+      // arquivar/restaurar muda em qual lista o fluxo aparece
+      if ('arquivado' in patch) { await get().fetchFollowup(); await get().fetchFluxosArquivados(); }
     } catch (e) {
       get().toast((e as ApiError).message || 'Não foi possível salvar');
       get().fetchFollowup();

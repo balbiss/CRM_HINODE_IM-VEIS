@@ -1,61 +1,90 @@
-import { and, asc, eq, lte, ne } from 'drizzle-orm';
+/** Motor de follow-up automático — mesmas regras do CRM OKA (v1, funções followup_* + rota
+ *  /followup/enviar). Resumo das regras:
+ *  - 1ª mensagem sai na hora (respeita "só horário comercial" do passo, seg–sáb 8h–20h);
+ *  - da 2ª em diante, só nas levas: seg–sex até 13h → manhã (a partir de 9h30), 13h–18h → 16h,
+ *    depois → próximo dia útil 9h30; sábado até 15h; domingo nada;
+ *  - "na próxima leva": saiu de manhã → 16h; à tarde → próxima manhã;
+ *  - no máximo 1 mensagem por corretor por passada e 40–60s entre mensagens do mesmo corretor;
+ *  - 1ª mensagem que não sai em 24h (WhatsApp desconectado) cancela e avisa o corretor;
+ *  - para quando o cliente responde, quando o corretor manda mensagem manual, ou se o lead foi
+ *    descartado / vendido / passou pra outro corretor; 3 falhas de envio → trava e avisa;
+ *  - esgotou sem resposta → descarta (motivo do fluxo) se o fluxo mandar;
+ *  - enquanto roda, o card fica em FOLLOW-UP AUTOMÁTICO; quando para, volta pra TAREFAS com
+ *    próximo contato pra hoje (com etiqueta do motivo no histórico). */
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import {
-  followupFluxos, followupPassos, followupExecucoes,
-  leads, perfis, imobiliarias, colunasKanban, mensagensWhatsapp, sessoesWhatsapp, notificacoes,
+  followupFluxos, followupPassos, followupExecucoes, followupEnvios, followupRitmoCorretor,
+  leads, perfis, imobiliarias, colunasKanban, mensagensWhatsapp, sessoesWhatsapp, notificacoes, imoveis,
 } from '../db/schema.js';
 import { registrarEvento } from './eventos.js';
-import { checarNumero } from './waha.js';
-import { numeroCentralDoLead } from './numeros.js';
 
-type Fluxo = typeof followupFluxos.$inferSelect;
+type Exec = typeof followupExecucoes.$inferSelect;
+type Passo = typeof followupPassos.$inferSelect;
 
-const SP = 'America/Sao_Paulo';
-const emSP = (d: Date) => new Date(d.toLocaleString('en-US', { timeZone: SP }));
-/** Diferença fixa entre o relógio real e o relógio de SP (Brasil não tem horário de verão). */
-const offsetSP = (d: Date) => d.getTime() - emSP(d).getTime();
+const FUSO = 'America/Sao_Paulo';
 
-function dias(fluxo: Fluxo): boolean[] {
-  const j = fluxo.janelaDias as unknown;
-  return Array.isArray(j) && j.length === 7 ? (j as boolean[]) : [false, true, true, true, true, true, false];
+// ---------- relógio de São Paulo (Brasil sem horário de verão: UTC-3 fixo) ----------
+function sp(d: Date) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: FUSO, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+  }).formatToParts(d).map(x => [x.type, x.value]));
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
+  return { ano: +p.year, mes: +p.month, dia: +p.day, min: (+p.hour % 24) * 60 + +p.minute, dow };
+}
+/** dia D (+n) às hh:mm de São Paulo */
+function emSp(base: { ano: number; mes: number; dia: number }, maisDias: number, hora: number, minuto = 0) {
+  return new Date(Date.UTC(base.ano, base.mes - 1, base.dia + maisDias, hora + 3, minuto));
+}
+const HM = (h: number, m = 0) => h * 60 + m;
+
+/** seg–sáb, 8h–20h (v1 followup_em_horario_comercial) */
+export function emHorarioComercial(d = new Date()) {
+  const s = sp(d);
+  return s.dow >= 1 && s.dow <= 6 && s.min >= HM(8) && s.min < HM(20);
+}
+/** As levas estão abertas agora? seg–sex 9h30–13h30 e 16h–18h30; sáb 9h30–15h30 (v1 followup_janela_aberta) */
+export function janelaAberta(d = new Date()) {
+  const s = sp(d);
+  if (s.dow === 0) return false;
+  if (s.dow === 6) return s.min >= HM(9, 30) && s.min <= HM(15, 30);
+  return (s.min >= HM(9, 30) && s.min <= HM(13, 30)) || (s.min >= HM(16) && s.min <= HM(18, 30));
+}
+/** Encaixa um vencimento na leva certa (v1 followup_janela_envio). */
+export function janelaEnvio(venc: Date): Date {
+  const s = sp(venc);
+  const max = (a: Date, b: Date) => (+a > +b ? a : b);
+  if (s.dow === 0) return emSp(s, 1, 9, 30);
+  if (s.dow === 6) return s.min <= HM(15) ? max(venc, emSp(s, 0, 9, 30)) : emSp(s, 2, 9, 30);
+  if (s.min <= HM(13)) return max(venc, emSp(s, 0, 9, 30));
+  if (s.min <= HM(18)) return max(venc, emSp(s, 0, 16));
+  return s.dow === 5 ? emSp(s, 3, 9, 30) : emSp(s, 1, 9, 30);
+}
+/** "Na próxima leva" a partir de quando a anterior saiu (v1 followup_proxima_leva). */
+export function proximaLeva(d = new Date()): Date {
+  const s = sp(d);
+  if (s.dow === 0) return emSp(s, 1, 9, 30);
+  if (s.dow === 6) return emSp(s, 2, 9, 30);
+  if (s.min < HM(13)) return emSp(s, 0, 16);
+  return s.dow === 5 ? emSp(s, 3, 9, 30) : emSp(s, 1, 9, 30);
+}
+/** Quando o passo vence (v1 followup_calc_proximo_envio). */
+export function calcProximoEnvio(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' | 'dataHoraFixa'>, inscritoEm: Date, agora = new Date()): Date {
+  if (p.dataHoraFixa) return p.dataHoraFixa;
+  if (p.baseAtraso === 'proxima_leva') return proximaLeva(agora);
+  if (p.baseAtraso === 'inscricao') return new Date(+inscritoEm + p.atrasoMinutos * 60000);
+  return new Date(+agora + p.atrasoMinutos * 60000);
 }
 
-/** A janela do fluxo permite mandar AGORA? (hora + dia da semana, fuso SP) */
-export function janelaPermiteAgora(fluxo: Fluxo, agora = new Date()): boolean {
-  const d = emSP(agora);
-  if (!dias(fluxo)[d.getDay()]) return false;
-  const min = d.getHours() * 60 + d.getMinutes();
-  return min >= fluxo.janelaInicioMin && min < fluxo.janelaFimMin;
+// ---------- variáveis do texto ({nome}, {corretor}, {origem}, {bairro}, {imovel_*}) ----------
+export function primeiroNome(nome: string | null | undefined) {
+  return String(nome || '').trim().split(/\s+/)[0] || '';
 }
-
-/** Empurra `base` pro próximo instante que cai dentro da janela do fluxo. Se já está dentro,
- *  devolve o próprio `base`. */
-export function proximaJanela(fluxo: Fluxo, base: Date): Date {
-  const off = offsetSP(base);
-  const sp = emSP(base);
-  for (let i = 0; i < 8; i++) {
-    const dia = new Date(sp.getFullYear(), sp.getMonth(), sp.getDate() + i, 0, 0, 0, 0);
-    if (!dias(fluxo)[dia.getDay()]) continue;
-    const inicio = new Date(dia.getTime()); inicio.setMinutes(fluxo.janelaInicioMin);
-    const fim = new Date(dia.getTime()); fim.setMinutes(fluxo.janelaFimMin);
-    let alvo: Date;
-    if (i === 0) {
-      if (sp.getTime() < inicio.getTime()) alvo = inicio;
-      else if (sp.getTime() < fim.getTime()) alvo = sp;
-      else continue;
-    } else {
-      alvo = inicio;
-    }
-    return new Date(alvo.getTime() + off);
-  }
-  return base;
+export function renderTemplate(texto: string, vars: Record<string, string>) {
+  return String(texto || '').replace(/\{(\w+)\}/g, (_m, k: string) => vars[k.toLowerCase()] ?? '');
 }
-
-function primeiroNome(nome: string) {
-  return (nome || '').trim().split(/\s+/)[0] || nome;
-}
-
+/** Compatível com quem já chamava (Agente de IA / templates da v2 com {{nome}}). */
 export function resolverVars(texto: string, ctx: { leadNome: string; corretorNome?: string | null; imobNome?: string | null; imovel?: string | null }): string {
   return (texto || '')
     .replace(/\{\{\s*primeiro_nome\s*\}\}/gi, primeiroNome(ctx.leadNome))
@@ -65,238 +94,455 @@ export function resolverVars(texto: string, ctx: { leadNome: string; corretorNom
     .replace(/\{\{\s*imovel\s*\}\}/gi, ctx.imovel || '');
 }
 
-async function fluxoDisparoDoCorretor(corretorId: string) {
-  const [f] = await db.select().from(followupFluxos)
-    .where(and(
-      eq(followupFluxos.corretorId, corretorId),
-      eq(followupFluxos.ativo, true),
-      eq(followupFluxos.disparaEmLeadNovo, true),
-    ))
-    .orderBy(asc(followupFluxos.criadoEm))
-    .limit(1);
-  return f ?? null;
-}
+// ---------- utilidades ----------
+const emitirLead = async (io: SocketServer, imobiliariaId: string, leadId: string) => {
+  const [l] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+  if (l) io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', l);
+};
+const avisarMudou = (io: SocketServer, imobiliariaId: string, leadId?: string) =>
+  io.to('imobiliaria:' + imobiliariaId).emit('followup:mudou', leadId ? { leadId } : {});
 
-async function execucaoViva(leadId: string) {
+async function colunaPorSlug(imobiliariaId: string, slug: string) {
+  const [c] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
+    .where(and(eq(colunasKanban.imobiliariaId, imobiliariaId), eq(colunasKanban.slug, slug))).limit(1);
+  return c?.id ?? null;
+}
+async function execucaoAtiva(leadId: string) {
   const [e] = await db.select().from(followupExecucoes)
-    .where(and(eq(followupExecucoes.leadId, leadId), ne(followupExecucoes.status, 'encerrada')))
-    .limit(1);
+    .where(and(eq(followupExecucoes.leadId, leadId), eq(followupExecucoes.status, 'ativa'))).limit(1);
   return e ?? null;
 }
-
-/** Sessão do WhatsApp que vai despachar essa régua (central ou do corretor). */
-async function sessaoDespacho(imobiliariaId: string, corretorId: string | null, sessaoDoLead: string | null) {
+async function nomeFluxo(id: string) {
+  const [f] = await db.select({ nome: followupFluxos.nome }).from(followupFluxos).where(eq(followupFluxos.id, id)).limit(1);
+  return f?.nome ?? '';
+}
+/** O WhatsApp por onde o follow-up desse corretor sai está no ar? */
+async function corretorConectado(imobiliariaId: string, corretorId: string) {
   const [imob] = await db.select({ modo: imobiliarias.modoWhatsapp }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
-  // com várias caixas de entrada: o mesmo número pelo qual o lead chegou (é por ele que a régua sai)
-  if (imob?.modo === 'central') return numeroCentralDoLead({ imobiliariaId, sessaoWhatsappId: sessaoDoLead });
-  if (corretorId) {
-    const [s] = await db.select().from(sessoesWhatsapp)
-      .where(and(eq(sessoesWhatsapp.corretorId, corretorId), eq(sessoesWhatsapp.status, 'conectada'))).limit(1);
-    return s ?? null;
+  const [s] = await db.select({ id: sessoesWhatsapp.id }).from(sessoesWhatsapp).where(and(
+    eq(sessoesWhatsapp.imobiliariaId, imobiliariaId),
+    imob?.modo === 'central' ? eq(sessoesWhatsapp.escopo, 'central') : eq(sessoesWhatsapp.corretorId, corretorId),
+    or(eq(sessoesWhatsapp.status, 'conectada'), eq(sessoesWhatsapp.oficialAtiva, true)),
+  )).limit(1);
+  return !!s;
+}
+
+/** Execução saiu do 'ativo' (menos "parado_lead"): o card volta da coluna FOLLOW-UP AUTOMÁTICO pra
+ *  TAREFAS com próximo contato pra hoje (mantém data futura que o corretor já marcou). */
+async function devolverPraTarefas(io: SocketServer, ex: Exec) {
+  const [colFollow, colTarefas] = await Promise.all([colunaPorSlug(ex.imobiliariaId, 'followup_auto'), colunaPorSlug(ex.imobiliariaId, 'atend')]);
+  if (!colFollow || !colTarefas) return;
+  const agora = new Date();
+  const r = await db.update(leads).set({
+    colunaId: colTarefas, entrouNaColunaEm: agora,
+    proximoContatoEm: sql`case when ${leads.proximoContatoEm} is null or ${leads.proximoContatoEm} < now() then now() else ${leads.proximoContatoEm} end`,
+  }).where(and(eq(leads.id, ex.leadId), eq(leads.colunaId, colFollow), isNotNull(leads.corretorId))).returning({ id: leads.id });
+  if (r.length) await emitirLead(io, ex.imobiliariaId, ex.leadId);
+}
+
+/** Fecha a execução com o resultado da v1 e faz o que vem junto (histórico, coluna). */
+async function finalizar(io: SocketServer, ex: Exec, resultado: string, motivo: string, opts: { pausa?: boolean; log?: string | null } = {}) {
+  const status = opts.pausa ? 'pausada' as const : 'encerrada' as const;
+  const r = await db.update(followupExecucoes).set({
+    status, resultado, motivoFim: motivo, finalizadoEm: new Date(), proximoEnvioEm: null,
+    reservadoEm: null, enviandoPasso: null, enviandoDesde: null,
+  }).where(and(eq(followupExecucoes.id, ex.id), eq(followupExecucoes.status, 'ativa'))).returning({ id: followupExecucoes.id });
+  if (!r.length) return false;
+  if (opts.log !== null) {
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', opts.log ?? ('Follow-up "' + await nomeFluxo(ex.fluxoId) + '" encerrado: ' + motivo + '.'), null);
   }
-  return null;
+  if (resultado !== 'parado_lead') await devolverPraTarefas(io, ex);
+  avisarMudou(io, ex.imobiliariaId, ex.leadId);
+  return true;
 }
 
-/** Data do 1º envio de uma execução recém-criada. `graceMs` cobre a janela de "aceitar o lead"
- *  quando o disparo é automático (a régua não manda antes de o corretor ter chance de recusar). */
-function primeiroEnvio(fluxo: Fluxo, passo0Min: number, graceMs: number): Date {
-  const base = new Date(Date.now() + Math.max(passo0Min * 60000, graceMs));
-  return proximaJanela(fluxo, base);
-}
-
+// ---------- iniciar ----------
 interface IniciarOpts {
   leadId: string;
   fluxoId: string;
   imobiliariaId: string;
   corretorId: string | null;
-  automatico: boolean; // true = disparo por lead novo (aplica grace + checa número)
+  automatico: boolean;
 }
 
-/** Cria uma execução de follow-up pro lead (se ainda não tem uma viva). */
-export async function iniciarFollowup(io: SocketServer, opts: IniciarOpts): Promise<{ ok: boolean; motivo?: string }> {
-  if (await execucaoViva(opts.leadId)) return { ok: false, motivo: 'já tem follow-up rodando' };
-
-  const [fluxo] = await db.select().from(followupFluxos)
-    .where(and(eq(followupFluxos.id, opts.fluxoId), eq(followupFluxos.imobiliariaId, opts.imobiliariaId))).limit(1);
-  if (!fluxo) return { ok: false, motivo: 'fluxo não encontrado' };
-
+/** v1 followup_iniciar_interno: precisa de corretor, fluxo ativo com passo e nenhum robô rodando. */
+export async function iniciarFollowup(io: SocketServer, opts: IniciarOpts): Promise<{ ok: boolean; motivo?: string; id?: string }> {
+  const [lead] = await db.select({ id: leads.id, corretorId: leads.corretorId, imobiliariaId: leads.imobiliariaId, colunaId: leads.colunaId })
+    .from(leads).where(eq(leads.id, opts.leadId)).limit(1);
+  if (!lead) return { ok: false, motivo: 'Lead não encontrado.' };
+  const corretorId = lead.corretorId ?? opts.corretorId;
+  if (!corretorId) return { ok: false, motivo: 'Lead sem corretor — não dá pra iniciar follow-up.' };
+  const [fluxo] = await db.select().from(followupFluxos).where(eq(followupFluxos.id, opts.fluxoId)).limit(1);
+  if (!fluxo || fluxo.imobiliariaId !== lead.imobiliariaId) return { ok: false, motivo: 'Fluxo inválido.' };
+  if (!fluxo.ativo || fluxo.arquivadoEm) return { ok: false, motivo: 'Fluxo está desativado.' };
   const passos = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, fluxo.id)).orderBy(asc(followupPassos.ordem));
-  if (!passos.length) return { ok: false, motivo: 'fluxo sem passos' };
+  if (!passos.length) return { ok: false, motivo: 'Fluxo não tem nenhum passo.' };
+  if (await execucaoAtiva(lead.id)) return { ok: false, motivo: 'Este lead já tem um follow-up rodando.' };
 
-  // Check de número antes da 1ª mensagem (só quando há sessão conectada pra checar).
-  if (opts.automatico) {
-    const [lead] = await db.select({ telefone: leads.telefone, nome: leads.nome, sessaoWhatsappId: leads.sessaoWhatsappId }).from(leads).where(eq(leads.id, opts.leadId)).limit(1);
-    const sessao = await sessaoDespacho(opts.imobiliariaId, opts.corretorId, lead?.sessaoWhatsappId ?? null);
-    if (lead && sessao) {
-      const existe = await checarNumero(sessao.sessionName, lead.telefone);
-      if (existe === false) {
-        if (opts.corretorId) {
-          await db.insert(notificacoes).values({
-            perfilId: opts.corretorId, tipo: 'followup', titulo: 'WhatsApp do lead parece inválido',
-            texto: `Não consegui iniciar o follow-up de ${lead.nome} — confere o número.`, lida: false,
-          });
-        }
-        registrarEvento(opts.imobiliariaId, opts.leadId, 'followup', 'Follow-up não iniciado: WhatsApp do lead parece inválido', fluxo.nome);
-        return { ok: false, motivo: 'número inválido' };
-      }
-    }
+  const agora = new Date();
+  const [ex] = await db.insert(followupExecucoes).values({
+    imobiliariaId: lead.imobiliariaId, leadId: lead.id, fluxoId: fluxo.id, corretorId,
+    passoAtual: 0, status: 'ativa', iniciadoEm: agora, iniciadoPor: opts.automatico ? 'automatico' : 'manual',
+    proximoEnvioEm: calcProximoEnvio(passos[0], agora, agora),
+  }).returning();
+  registrarEvento(lead.imobiliariaId, lead.id, 'followup', 'Follow-up "' + fluxo.nome + '" iniciado'
+    + (opts.automatico ? ' automaticamente' : '') + ' (' + passos.length + ' passo(s)).', null);
+  // card vai pra coluna FOLLOW-UP AUTOMÁTICO enquanto o robô roda
+  const colFollow = await colunaPorSlug(lead.imobiliariaId, 'followup_auto');
+  if (colFollow && lead.colunaId !== colFollow) {
+    await db.update(leads).set({ colunaId: colFollow, entrouNaColunaEm: agora }).where(eq(leads.id, lead.id));
+    await emitirLead(io, lead.imobiliariaId, lead.id);
   }
-
-  const proximo = primeiroEnvio(fluxo, passos[0].atrasoMinutos, opts.automatico ? 90000 : 0);
-  await db.insert(followupExecucoes).values({
-    imobiliariaId: opts.imobiliariaId, leadId: opts.leadId, fluxoId: fluxo.id,
-    corretorId: opts.corretorId, passoAtual: 0, status: 'ativa', proximoEnvioEm: proximo,
-  });
-  registrarEvento(opts.imobiliariaId, opts.leadId, 'followup', 'Follow-up iniciado: ' + fluxo.nome, fluxo.nome);
-  io.to('imobiliaria:' + opts.imobiliariaId).emit('followup:mudou', { leadId: opts.leadId });
-  return { ok: true };
+  avisarMudou(io, lead.imobiliariaId, lead.id);
+  return { ok: true, id: ex.id };
 }
 
-/** Chamado quando um lead é atribuído a um corretor (roleta ou manual). */
-export async function dispararGatilhoLeadNovo(io: SocketServer, imobiliariaId: string, leadId: string, corretorId: string) {
+/** v1 followup_disparo_automatico: lead ganhou corretor → fluxo da campanha do lead (se tiver) ou
+ *  o fluxo Geral do corretor. Só com o follow-up automático ligado na imobiliária. Lead cadastrado à
+ *  mão não dispara sozinho (manual=true). */
+export async function dispararGatilhoLeadNovo(io: SocketServer, imobiliariaId: string, leadId: string, corretorId: string, manual = false) {
   try {
-    if (await execucaoViva(leadId)) return;
-    const fluxo = await fluxoDisparoDoCorretor(corretorId);
-    if (!fluxo) return;
-    await iniciarFollowup(io, { leadId, fluxoId: fluxo.id, imobiliariaId, corretorId, automatico: true });
+    if (manual) return;
+    if (await execucaoAtiva(leadId)) return;
+    const [imob] = await db.select({ ativo: imobiliarias.followupAutomaticoAtivo }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
+    if (!imob?.ativo) return;
+    const [lead] = await db.select({ campanha: leads.campanha }).from(leads).where(eq(leads.id, leadId)).limit(1);
+    let fluxoId: string | null = null;
+    if (lead?.campanha) {
+      const [f] = await db.select({ id: followupFluxos.id }).from(followupFluxos).where(and(
+        eq(followupFluxos.imobiliariaId, imobiliariaId), eq(followupFluxos.campanha, lead.campanha),
+        eq(followupFluxos.ativo, true), isNull(followupFluxos.arquivadoEm),
+      )).limit(1);
+      fluxoId = f?.id ?? null;
+    }
+    if (!fluxoId) {
+      const [f] = await db.select({ id: followupFluxos.id }).from(followupFluxos).where(and(
+        eq(followupFluxos.corretorId, corretorId), eq(followupFluxos.ativo, true),
+        eq(followupFluxos.disparaEmLeadNovo, true), isNull(followupFluxos.arquivadoEm),
+      )).limit(1);
+      fluxoId = f?.id ?? null;
+    }
+    if (!fluxoId) return;
+    await iniciarFollowup(io, { leadId, fluxoId, imobiliariaId, corretorId, automatico: true });
   } catch (e) {
     console.error('followup gatilho:', (e as Error).message);
   }
 }
 
-/** Lead respondeu no WhatsApp → pausa a régua (o corretor assume; pode retomar depois). */
+/** Cliente mandou mensagem → para na hora (sem esperar a passada): v1 "respondeu". */
 export async function pausarPorResposta(io: SocketServer, imobiliariaId: string, leadId: string) {
   try {
-    const ex = await execucaoViva(leadId);
-    if (!ex || ex.status !== 'ativa') return;
-    await db.update(followupExecucoes).set({ status: 'pausada', motivoFim: 'lead respondeu' }).where(eq(followupExecucoes.id, ex.id));
-    if (ex.corretorId) {
-      await db.insert(notificacoes).values({
-        perfilId: ex.corretorId, tipo: 'followup', titulo: 'Follow-up pausado',
-        texto: 'O lead respondeu — assumindo a conversa.', lida: false,
-      });
-    }
-    registrarEvento(imobiliariaId, leadId, 'followup', 'Follow-up pausado — o lead respondeu', null);
-    io.to('imobiliaria:' + imobiliariaId).emit('followup:mudou', { leadId });
+    const ex = await execucaoAtiva(leadId);
+    if (!ex) return;
+    await marcarRespondeu(io, ex);
   } catch (e) {
-    console.error('followup pausar:', (e as Error).message);
+    console.error('followup resposta:', (e as Error).message);
+  }
+}
+async function marcarRespondeu(io: SocketServer, ex: Exec) {
+  if (!await finalizar(io, ex, 'respondeu', 'cliente respondeu', { log: 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" encerrado: cliente respondeu. 🤖 Cliente respondeu o robô' })) return;
+  // marca a última mensagem do robô como "a que fez o cliente responder" (métrica do Dashboard)
+  const [ult] = await db.select({ id: followupEnvios.id }).from(followupEnvios).where(eq(followupEnvios.execucaoId, ex.id)).orderBy(desc(followupEnvios.enviadoEm)).limit(1);
+  if (ult) await db.update(followupEnvios).set({ respondeuApos: true }).where(eq(followupEnvios.id, ult.id));
+  if (ex.corretorId) {
+    const [l] = await db.select({ nome: leads.nome, telefone: leads.telefone }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
+    await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_respondido', titulo: (l?.nome || l?.telefone || 'Lead') + ' respondeu o follow-up' });
   }
 }
 
-/** Encerra qualquer execução viva do lead (recusa, venda, descarte, exclusão). */
+/** Para qualquer robô rodando no lead (descarte, venda, transferência, corretor tirou da coluna...). */
 export async function encerrarPorLead(io: SocketServer, imobiliariaId: string, leadId: string, motivo: string) {
   try {
-    const ex = await execucaoViva(leadId);
+    const ex = await execucaoAtiva(leadId);
     if (!ex) return;
-    await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: motivo, proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
-    io.to('imobiliaria:' + imobiliariaId).emit('followup:mudou', { leadId });
+    const tirouDaColuna = /coluna|cadência|cadencia/i.test(motivo);
+    await finalizar(io, ex, tirouDaColuna ? 'pausado_corretor' : 'parado_lead', motivo, {
+      pausa: tirouDaColuna,
+      log: tirouDaColuna
+        ? 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" pausado: ' + motivo + ' (assumiu o lead). 🤖 Robô parou: corretor assumiu'
+        : undefined,
+    });
   } catch (e) {
     console.error('followup encerrar:', (e as Error).message);
   }
 }
 
-async function concluir(io: SocketServer, ex: typeof followupExecucoes.$inferSelect, fluxo: Fluxo) {
-  await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: 'concluído', proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
-  registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up concluído: ' + fluxo.nome, fluxo.nome);
-
-  if (fluxo.aoEsgotar === 'descartar') {
-    const [rebatida] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
-      .where(and(eq(colunasKanban.imobiliariaId, ex.imobiliariaId), eq(colunasKanban.slug, 'rebatida'))).limit(1);
-    await db.update(leads).set({
-      motivoDescarte: 'Follow-up esgotado sem resposta',
-      ...(rebatida ? { colunaId: rebatida.id, entrouNaColunaEm: new Date() } : {}),
-    }).where(eq(leads.id, ex.leadId));
-    registrarEvento(ex.imobiliariaId, ex.leadId, 'descarte', 'Descartado: follow-up esgotado sem resposta', fluxo.nome);
-    const [lead] = await db.select().from(leads).where(eq(leads.id, ex.leadId)).limit(1);
-    if (lead) io.to('imobiliaria:' + ex.imobiliariaId).emit('lead:updated', lead);
-  } else if (fluxo.aoEsgotar === 'mover' && fluxo.aoEsgotarColunaId) {
-    await db.update(leads).set({ colunaId: fluxo.aoEsgotarColunaId, entrouNaColunaEm: new Date() }).where(eq(leads.id, ex.leadId));
-    const [lead] = await db.select().from(leads).where(eq(leads.id, ex.leadId)).limit(1);
-    if (lead) io.to('imobiliaria:' + ex.imobiliariaId).emit('lead:updated', lead);
+// ---------- pausar / retomar / encerrar / trocar (tela) ----------
+export async function mudarExecucao(io: SocketServer, ex: Exec, acao: 'pausada' | 'ativa' | 'encerrada', ator: string) {
+  if (acao === 'encerrada') {
+    if (ex.status === 'encerrada') return;
+    await db.update(followupExecucoes).set({ status: 'encerrada', resultado: 'encerrado_manual', motivoFim: 'encerrado manualmente', finalizadoEm: new Date(), proximoEnvioEm: null })
+      .where(eq(followupExecucoes.id, ex.id));
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" encerrado manualmente.', ator);
+    if (ex.status === 'ativa') await devolverPraTarefas(io, ex);
+  } else if (acao === 'pausada') {
+    if (ex.status !== 'ativa') return;
+    await db.update(followupExecucoes).set({ status: 'pausada', resultado: 'pausado_corretor', motivoFim: 'pausado manualmente', reservadoEm: null })
+      .where(eq(followupExecucoes.id, ex.id));
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" pausado.', ator);
+  } else {
+    if (ex.status !== 'pausada') return;
+    if (await execucaoAtiva(ex.leadId)) return;
+    // retomar: 1ª mensagem ainda não saiu → agora; senão na próxima leva
+    await db.update(followupExecucoes).set({
+      status: 'ativa', resultado: null, motivoFim: null, finalizadoEm: null, tentativasErro: 0,
+      proximoEnvioEm: ex.passoAtual === 0 ? new Date() : janelaEnvio(new Date()),
+    }).where(eq(followupExecucoes.id, ex.id));
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" retomado.', ator);
   }
-  io.to('imobiliaria:' + ex.imobiliariaId).emit('followup:mudou', { leadId: ex.leadId });
+  avisarMudou(io, ex.imobiliariaId, ex.leadId);
 }
 
-/** Varredura periódica: manda os passos que venceram, respeitando a janela. */
-export async function varrerFollowups(io: SocketServer): Promise<number> {
-  const agora = new Date();
-  const pendentes = await db.select().from(followupExecucoes)
-    .where(and(eq(followupExecucoes.status, 'ativa'), lte(followupExecucoes.proximoEnvioEm, agora)));
-  let enviados = 0;
+// ---------- passada do motor (v1 followup_proximo_lote + /followup/enviar) ----------
+let rodando = false;
 
-  for (const ex of pendentes) {
-    try {
-      const [fluxo] = await db.select().from(followupFluxos).where(eq(followupFluxos.id, ex.fluxoId)).limit(1);
-      if (!fluxo || !fluxo.ativo) {
-        await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: 'fluxo desativado', proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
-        io.to('imobiliaria:' + ex.imobiliariaId).emit('followup:mudou', { leadId: ex.leadId });
-        continue;
+export async function varrerFollowups(io: SocketServer, limite = 25): Promise<number> {
+  if (rodando) return 0; // nunca duas passadas ao mesmo tempo (era o que mandava o mesmo passo 2x na v1)
+  rodando = true;
+  try {
+    await limparParados(io);
+    const lote = await escolherLote(limite);
+    let enviados = 0;
+    for (const ex of lote) {
+      try {
+        if (await enviarPasso(io, ex)) enviados++;
+      } catch (e) {
+        console.error('followup envio (execução ' + ex.id + '):', (e as Error).message);
+        await registrarErro(io, ex, (e as Error).message);
       }
-      if (!janelaPermiteAgora(fluxo, agora)) {
-        await db.update(followupExecucoes).set({ proximoEnvioEm: proximaJanela(fluxo, agora) }).where(eq(followupExecucoes.id, ex.id));
-        continue;
-      }
+    }
+    return enviados;
+  } finally {
+    rodando = false;
+  }
+}
 
-      const passos = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId)).orderBy(asc(followupPassos.ordem));
-      const passo = passos[ex.passoAtual];
-      if (!passo) { await concluir(io, ex, fluxo); continue; }
-
-      const [lead] = await db.select().from(leads).where(eq(leads.id, ex.leadId)).limit(1);
-      if (!lead) {
-        await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: 'lead removido', proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
-        continue;
-      }
-      const [corr] = ex.corretorId ? await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, ex.corretorId)).limit(1) : [undefined];
-      const [imob] = await db.select({ nome: imobiliarias.nome }).from(imobiliarias).where(eq(imobiliarias.id, ex.imobiliariaId)).limit(1);
-
-      const texto = passo.conteudo ? resolverVars(passo.conteudo, { leadNome: lead.nome, corretorNome: corr?.nome, imobNome: imob?.nome, imovel: lead.imovelTitulo }) : null;
-      const anexoTipo = passo.tipo === 'imagem' ? 'imagem' : passo.tipo === 'audio' ? 'audio' : passo.tipo === 'pdf' ? 'documento' : null;
-
-      const { despacharPeloWhatsapp } = await import('../routes/whatsapp.js');
-      const r = await despacharPeloWhatsapp({
-        imobiliariaId: ex.imobiliariaId, leadId: lead.id, telefone: lead.telefone, corretorId: ex.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
-        texto, anexoUrl: passo.anexoUrl, anexoTipo: anexoTipo as 'imagem' | 'audio' | 'documento' | null, anexoNome: passo.anexoNome,
+/** Antes de mandar: cancela 1º contato velho, e encerra quem respondeu / corretor assumiu / lead mudou. */
+async function limparParados(io: SocketServer) {
+  const ativas = await db.select().from(followupExecucoes).where(eq(followupExecucoes.status, 'ativa'));
+  const agora = Date.now();
+  for (const ex of ativas) {
+    // 1ª mensagem que não saiu em 24h: cancela (não manda "oi, vi seu cadastro" dias depois)
+    if (ex.passoAtual === 0 && agora - +ex.iniciadoEm > 24 * 3600000) {
+      const ok = await finalizar(io, ex, 'encerrado_manual', 'cancelado: 1ª mensagem não saiu em 24h (WhatsApp do corretor desconectado?)', {
+        log: 'Follow-up automático cancelado: a 1ª mensagem não saiu em 24h (WhatsApp do corretor estava desconectado). Faça o contato manualmente. 🤖 Robô não conseguiu enviar',
       });
-      if (!r.enviado) {
-        if (r.erro === 'NUMERO_INEXISTENTE') {
-          // número sem WhatsApp: não adianta tentar de novo
-          await db.update(followupExecucoes).set({ status: 'encerrada', motivoFim: 'número sem WhatsApp', proximoEnvioEm: null }).where(eq(followupExecucoes.id, ex.id));
-          registrarEvento(ex.imobiliariaId, lead.id, 'followup', 'Follow-up encerrado: o número não tem WhatsApp', fluxo.nome);
-          io.to('imobiliaria:' + ex.imobiliariaId).emit('followup:mudou', { leadId: lead.id });
-          continue;
-        }
-        // sem sessão conectada / falha no envio — tenta de novo em 15 min, sem avançar
-        console.error('followup: não enviou (execução ' + ex.id + ', lead ' + lead.id + '):', r.erro);
-        await db.update(followupExecucoes).set({ proximoEnvioEm: new Date(agora.getTime() + 15 * 60000) }).where(eq(followupExecucoes.id, ex.id));
-        continue;
+      if (ok && ex.corretorId) {
+        const [l] = await db.select({ nome: leads.nome, telefone: leads.telefone }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
+        await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up cancelado (WhatsApp desconectado) — faça contato manual com ' + (l?.nome || l?.telefone || 'o lead') });
       }
-
-      const [msg] = await db.insert(mensagensWhatsapp).values({
-        leadId: lead.id, direcao: 'out', canal: 'followup', enviadoPor: ex.corretorId, ackStatus: r.waMessageId ? 2 : 1,
-        waMessageId: r.waMessageId ?? null, waChave: r.waChave ?? null,
-        texto: texto ?? null, anexoUrl: passo.anexoUrl ?? null, anexoTipo, anexoNome: passo.anexoNome ?? null,
-      }).returning();
-      io.to('imobiliaria:' + ex.imobiliariaId).emit('mensagem:created', msg);
-
-      if (passo.cadenciaLabel && lead.cadencia !== passo.cadenciaLabel) {
-        await db.update(leads).set({ cadencia: passo.cadenciaLabel }).where(eq(leads.id, lead.id));
-        io.to('imobiliaria:' + ex.imobiliariaId).emit('lead:updated', { ...lead, cadencia: passo.cadenciaLabel });
-      }
-      registrarEvento(ex.imobiliariaId, lead.id, 'followup', 'Follow-up enviou' + (passo.cadenciaLabel ? ' — ' + passo.cadenciaLabel : ' o passo ' + (ex.passoAtual + 1)), fluxo.nome);
-      enviados++;
-
-      const prox = ex.passoAtual + 1;
-      if (prox >= passos.length) {
-        await concluir(io, { ...ex, passoAtual: prox }, fluxo);
-      } else {
-        const base = new Date(agora.getTime() + passos[prox].atrasoMinutos * 60000);
-        await db.update(followupExecucoes).set({ passoAtual: prox, proximoEnvioEm: proximaJanela(fluxo, base) }).where(eq(followupExecucoes.id, ex.id));
-        io.to('imobiliaria:' + ex.imobiliariaId).emit('followup:mudou', { leadId: lead.id });
-      }
-    } catch (e) {
-      console.error('followup varredura (execução ' + ex.id + '):', (e as Error).message);
-      await db.update(followupExecucoes).set({ proximoEnvioEm: new Date(agora.getTime() + 15 * 60000) }).where(eq(followupExecucoes.id, ex.id)).catch(() => {});
+      continue;
+    }
+    const msgs = await db.select({ direcao: mensagensWhatsapp.direcao, canal: mensagensWhatsapp.canal }).from(mensagensWhatsapp)
+      .where(and(eq(mensagensWhatsapp.leadId, ex.leadId), gt(mensagensWhatsapp.enviadoEm, ex.iniciadoEm)));
+    if (msgs.some(m => m.direcao === 'in')) { await marcarRespondeu(io, ex); continue; }
+    if (msgs.some(m => m.direcao === 'out' && m.canal !== 'followup')) {
+      await finalizar(io, ex, 'pausado_corretor', 'corretor assumiu a conversa', {
+        pausa: true, log: 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" encerrado: corretor assumiu a conversa. 🤖 Robô parou: corretor assumiu',
+      });
+      continue;
+    }
+    const [l] = await db.select().from(leads).where(eq(leads.id, ex.leadId)).limit(1);
+    if (!l) { await finalizar(io, ex, 'parado_lead', 'lead removido', { log: null }); continue; }
+    if (l.descartadoEm || l.vendaPendenteAprovacao || l.dataFechamento || l.corretorId !== ex.corretorId) {
+      const motivo = l.descartadoEm ? 'lead descartado' : l.corretorId !== ex.corretorId ? 'lead transferido para outro corretor' : 'lead vendido';
+      await finalizar(io, ex, 'parado_lead', motivo);
     }
   }
-  return enviados;
+}
+
+/** Candidatos: venceu, liberado (manual ou automático ligado), na janela, WhatsApp do corretor no ar;
+ *  1 por corretor, 1º contato primeiro, nada em voo e ritmo de 40–60s respeitado. */
+async function escolherLote(limite: number): Promise<Exec[]> {
+  const agora = new Date();
+  const vencidas = await db.select().from(followupExecucoes)
+    .where(and(eq(followupExecucoes.status, 'ativa'), lte(followupExecucoes.proximoEnvioEm, agora)))
+    .orderBy(asc(followupExecucoes.proximoEnvioEm));
+  if (!vencidas.length) return [];
+  const autoLigado = new Map<string, boolean>();
+  const porCorretor = new Map<string, Exec>();
+  const emVoo = new Set((await db.select({ c: followupExecucoes.corretorId }).from(followupExecucoes).where(and(
+    eq(followupExecucoes.status, 'ativa'), gt(followupExecucoes.reservadoEm, new Date(+agora - 15 * 60000)),
+  ))).map(r => r.c));
+  const ritmo = new Map((await db.select().from(followupRitmoCorretor)).map(r => [r.corretorId, r.liberadoEm]));
+  const conectado = new Map<string, boolean>();
+
+  for (const ex of vencidas) {
+    if (!ex.corretorId || emVoo.has(ex.corretorId)) continue;
+    const lib = ritmo.get(ex.corretorId);
+    if (lib && +lib > +agora) continue;
+    if (ex.iniciadoPor !== 'manual') {
+      if (!autoLigado.has(ex.imobiliariaId)) {
+        const [i] = await db.select({ a: imobiliarias.followupAutomaticoAtivo }).from(imobiliarias).where(eq(imobiliarias.id, ex.imobiliariaId)).limit(1);
+        autoLigado.set(ex.imobiliariaId, !!i?.a);
+      }
+      if (!autoLigado.get(ex.imobiliariaId)) continue;
+    }
+    const [passo] = await db.select().from(followupPassos).where(and(eq(followupPassos.fluxoId, ex.fluxoId), eq(followupPassos.ordem, ex.passoAtual))).limit(1);
+    if (!passo) continue;
+    if (passo.soHorarioComercial && !emHorarioComercial(agora)) continue;
+    if (ex.passoAtual > 0 && !janelaAberta(agora)) continue;
+    if (!conectado.has(ex.corretorId)) conectado.set(ex.corretorId, await corretorConectado(ex.imobiliariaId, ex.corretorId));
+    if (!conectado.get(ex.corretorId)) continue;
+    const atual = porCorretor.get(ex.corretorId);
+    // por corretor: o 1º contato (passo 1) vem antes; depois o que venceu primeiro
+    if (!atual || (ex.passoAtual === 0 && atual.passoAtual !== 0)) porCorretor.set(ex.corretorId, ex);
+  }
+  const escolhidos = [...porCorretor.values()]
+    .sort((a, b) => (a.passoAtual === 0 ? 0 : 1) - (b.passoAtual === 0 ? 0 : 1) || +a.proximoEnvioEm! - +b.proximoEnvioEm!)
+    .slice(0, limite);
+  if (!escolhidos.length) return [];
+  // reserva por 30 min (se o envio der certo o próximo passo sobrescreve; se falhar, volta em 5 min)
+  const reservadas = await db.update(followupExecucoes)
+    .set({ proximoEnvioEm: new Date(+agora + 30 * 60000), reservadoEm: agora })
+    .where(and(inArray(followupExecucoes.id, escolhidos.map(e => e.id)), eq(followupExecucoes.status, 'ativa'), lte(followupExecucoes.proximoEnvioEm, agora)))
+    .returning();
+  return escolhidos.filter(e => reservadas.some(r => r.id === e.id)).map(e => reservadas.find(r => r.id === e.id)!);
+}
+
+/** Um passo: reivindica, monta o texto, manda pelo WhatsApp, grava e agenda o próximo. */
+async function enviarPasso(io: SocketServer, ex: Exec): Promise<boolean> {
+  const [passo] = await db.select().from(followupPassos).where(and(eq(followupPassos.fluxoId, ex.fluxoId), eq(followupPassos.ordem, ex.passoAtual))).limit(1);
+  const [lead] = await db.select().from(leads).where(eq(leads.id, ex.leadId)).limit(1);
+  if (!passo || !lead) { await db.update(followupExecucoes).set({ reservadoEm: null }).where(eq(followupExecucoes.id, ex.id)); return false; }
+
+  // reivindica: confere de novo, imediatamente antes de mandar, que nada mudou desde o lote
+  const [atual] = await db.select().from(followupExecucoes).where(eq(followupExecucoes.id, ex.id)).limit(1);
+  if (!atual || atual.status !== 'ativa' || atual.passoAtual !== ex.passoAtual) return false;
+  if (atual.enviandoPasso === ex.passoAtual && atual.enviandoDesde && Date.now() - +atual.enviandoDesde < 10 * 60000) return false;
+  if (lead.descartadoEm || lead.corretorId !== ex.corretorId) { await db.update(followupExecucoes).set({ reservadoEm: null }).where(eq(followupExecucoes.id, ex.id)); return false; }
+  const [conversa] = await db.select({ id: mensagensWhatsapp.id }).from(mensagensWhatsapp).where(and(
+    eq(mensagensWhatsapp.leadId, ex.leadId), gt(mensagensWhatsapp.enviadoEm, ex.iniciadoEm),
+    or(eq(mensagensWhatsapp.direcao, 'in'), and(eq(mensagensWhatsapp.direcao, 'out'), ne(mensagensWhatsapp.canal, 'followup'))),
+  )).limit(1);
+  if (conversa) { await db.update(followupExecucoes).set({ reservadoEm: null }).where(eq(followupExecucoes.id, ex.id)); return false; }
+  await db.update(followupExecucoes).set({ enviandoPasso: ex.passoAtual, enviandoDesde: new Date() }).where(eq(followupExecucoes.id, ex.id));
+
+  // texto: {nome} = primeiro nome; imóvel casado pela referência do anúncio (= origem do lead)
+  const [corr] = ex.corretorId ? await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, ex.corretorId)).limit(1) : [];
+  const origem = lead.referencia || lead.campanha || '';
+  const [imovel] = origem
+    ? await db.select().from(imoveis).where(and(eq(imoveis.imobiliariaId, ex.imobiliariaId), eq(imoveis.referenciaAnuncio, origem))).limit(1)
+    : [];
+  const pedeFoto = /\{imovel_foto\}/i.test(passo.conteudo || '');
+  const semFoto = (passo.conteudo || '').replace(/\n?\s*\{imovel_foto\}\s*\n?/gi, '\n').trim();
+  const texto = semFoto ? renderTemplate(semFoto, {
+    nome: primeiroNome(lead.nome), corretor: corr?.nome ?? '', origem, bairro: lead.bairroInteresse ?? '',
+    imovel_titulo: imovel?.titulo ?? '', imovel_descricao: imovel?.descricao ?? '',
+    imovel_preco: imovel?.preco ? Number(imovel.preco).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '',
+  }) : '';
+  let anexoUrl = passo.anexoUrl ?? null;
+  let anexoTipo = normalizarTipo(passo.anexoTipo ?? passo.tipo);
+  let anexoNome = passo.anexoNome ?? null;
+  if (!anexoUrl && pedeFoto && imovel?.imagens?.[0]) { anexoUrl = imovel.imagens[0]; anexoTipo = 'imagem'; anexoNome = 'foto-imovel.jpg'; }
+  if (!anexoUrl) anexoTipo = null;
+  if (!texto && !anexoUrl) { await registrarErro(io, ex, 'passo sem texto nem anexo'); return false; }
+
+  const { despacharPeloWhatsapp } = await import('../routes/whatsapp.js');
+  let r = await despacharPeloWhatsapp({
+    imobiliariaId: ex.imobiliariaId, leadId: lead.id, telefone: lead.telefone, corretorId: ex.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
+    texto: texto || null, anexoUrl, anexoTipo, anexoNome,
+  });
+  if (!r.enviado && r.erro === 'NUMERO_INEXISTENTE' && lead.telefoneAlternativo) {
+    r = await despacharPeloWhatsapp({
+      imobiliariaId: ex.imobiliariaId, leadId: lead.id, telefone: lead.telefoneAlternativo, corretorId: ex.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
+      texto: texto || null, anexoUrl, anexoTipo, anexoNome,
+    });
+  }
+  if (!r.enviado) {
+    await registrarErro(io, ex, r.erro === 'NUMERO_INEXISTENTE' ? 'número não encontrado no WhatsApp (ou conexão momentaneamente fora do ar)' : (r.erro || 'falha no envio'));
+    return false;
+  }
+
+  const [msg] = await db.insert(mensagensWhatsapp).values({
+    leadId: lead.id, direcao: 'out', canal: 'followup', enviadoPor: ex.corretorId, ackStatus: r.waMessageId ? 2 : 1,
+    waMessageId: r.waMessageId ?? null, waChave: r.waChave ?? null, lida: true,
+    texto: texto || null, anexoUrl, anexoTipo, anexoNome,
+  }).onConflictDoNothing().returning();
+  if (msg) io.to('imobiliaria:' + ex.imobiliariaId).emit('mensagem:created', msg);
+  await registrarEnvio(io, ex, texto, r.waMessageId ?? null, msg?.id ?? null);
+  return true;
+}
+
+function normalizarTipo(t: string | null | undefined): 'imagem' | 'video' | 'audio' | 'documento' | null {
+  if (!t || t === 'texto') return null;
+  if (t === 'imagem' || t === 'image') return 'imagem';
+  if (t === 'video') return 'video';
+  if (t === 'audio') return 'audio';
+  return 'documento';
+}
+
+/** v1 followup_registrar_envio: grava o envio, ritmo do corretor, +1 na cadência, próximo passo ou fim. */
+async function registrarEnvio(io: SocketServer, ex: Exec, texto: string, waMessageId: string | null, mensagemId: string | null) {
+  const agora = new Date();
+  await db.insert(followupEnvios).values({ execucaoId: ex.id, passoOrdem: ex.passoAtual + 1, conteudoEnviado: texto, waMessageId, mensagemId });
+  const liberado = new Date(+agora + (40 + Math.floor(Math.random() * 21)) * 1000);
+  await db.insert(followupRitmoCorretor).values({ corretorId: ex.corretorId!, liberadoEm: liberado })
+    .onConflictDoUpdate({ target: followupRitmoCorretor.corretorId, set: { liberadoEm: liberado } });
+  const [l] = await db.update(leads).set({
+    cadenciaChamada: sql`least(${leads.cadenciaChamada} + 1, 5)`, dataUltimaChamada: agora, ultimaAcaoEm: agora,
+  }).where(eq(leads.id, ex.leadId)).returning();
+  if (l) {
+    await db.update(leads).set({ cadencia: 'Chamada ' + l.cadenciaChamada }).where(eq(leads.id, l.id));
+  }
+
+  const passos = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId)).orderBy(asc(followupPassos.ordem));
+  const prox = passos.find(p => p.ordem === ex.passoAtual + 1);
+  const [fluxo] = await db.select().from(followupFluxos).where(eq(followupFluxos.id, ex.fluxoId)).limit(1);
+  if (prox) {
+    await db.update(followupExecucoes).set({
+      passoAtual: ex.passoAtual + 1, proximoEnvioEm: janelaEnvio(calcProximoEnvio(prox, ex.iniciadoEm, agora)),
+      tentativasErro: 0, enviandoPasso: null, enviandoDesde: null, reservadoEm: null,
+    }).where(eq(followupExecucoes.id, ex.id));
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + (fluxo?.nome ?? '') + '" enviou o passo ' + (ex.passoAtual + 1) + ' de ' + passos.length + '.', null);
+    await emitirLead(io, ex.imobiliariaId, ex.leadId);
+    avisarMudou(io, ex.imobiliariaId, ex.leadId);
+    return;
+  }
+
+  // acabaram os passos sem resposta
+  await db.update(followupExecucoes).set({ passoAtual: ex.passoAtual + 1, enviandoPasso: null, enviandoDesde: null, reservadoEm: null }).where(eq(followupExecucoes.id, ex.id));
+  const exFim = { ...ex, passoAtual: ex.passoAtual + 1 };
+  if (fluxo?.aoEsgotar === 'descartar') {
+    const rebatida = await colunaPorSlug(ex.imobiliariaId, 'rebatida');
+    await db.update(leads).set({
+      corretorId: null, colunaId: rebatida ?? undefined, motivoDescarte: fluxo.motivoDescarteEsgotar, descartadoPor: ex.corretorId,
+      descartadoEm: agora, proximoContatoEm: null, dataVisita: null, ultimaAcaoEm: agora, entrouNaColunaEm: agora,
+    }).where(and(eq(leads.id, ex.leadId), isNull(leads.descartadoEm), eq(leads.corretorId, ex.corretorId!)));
+    await finalizar(io, exFim, 'concluido', 'esgotado sem resposta -> lead descartado', {
+      log: 'Follow-up "' + fluxo.nome + '": ' + passos.length + ' de ' + passos.length + ' passo(s) enviado(s) sem resposta. Lead descartado automaticamente (motivo: ' + fluxo.motivoDescarteEsgotar + ').',
+    });
+    await emitirLead(io, ex.imobiliariaId, ex.leadId);
+  } else if (fluxo?.aoEsgotar === 'mover' && fluxo.aoEsgotarColunaId) {
+    await finalizar(io, exFim, 'parado_lead', 'concluído sem resposta', { log: 'Follow-up "' + fluxo.nome + '" concluído: ' + passos.length + ' passo(s) enviado(s), sem resposta do cliente.' });
+    await db.update(leads).set({ colunaId: fluxo.aoEsgotarColunaId, entrouNaColunaEm: agora }).where(eq(leads.id, ex.leadId));
+    await emitirLead(io, ex.imobiliariaId, ex.leadId);
+  } else {
+    await finalizar(io, exFim, 'concluido', 'concluído sem resposta', {
+      log: 'Follow-up "' + (fluxo?.nome ?? '') + '" concluído: ' + passos.length + ' passo(s) enviado(s), sem resposta do cliente. 🤖 Robô terminou sem resposta',
+    });
+  }
+}
+
+/** v1 followup_registrar_erro: tenta de novo em 5 min; na 3ª falha trava e avisa corretor + gestão. */
+async function registrarErro(io: SocketServer, ex: Exec, erro: string) {
+  const [atual] = await db.select().from(followupExecucoes).where(and(eq(followupExecucoes.id, ex.id), eq(followupExecucoes.status, 'ativa'))).limit(1);
+  if (!atual) return;
+  const desistiu = atual.tentativasErro + 1 >= 3;
+  await db.update(followupExecucoes).set({
+    tentativasErro: atual.tentativasErro + 1, motivoFim: erro.slice(0, 500),
+    proximoEnvioEm: new Date(Date.now() + 5 * 60000), enviandoPasso: null, enviandoDesde: null, reservadoEm: null,
+    ...(desistiu ? { status: 'pausada' as const, resultado: 'erro', finalizadoEm: new Date() } : {}),
+  }).where(eq(followupExecucoes.id, ex.id));
+  if (!desistiu) return;
+  const [l] = await db.select({ nome: leads.nome }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
+  registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" travado após 3 tentativas de envio sem sucesso ('
+    + erro + '). Mande mensagem manual pra esse lead. 🤖 Robô não conseguiu enviar', null);
+  if (ex.corretorId) await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado — mande mensagem manual pra ' + (l?.nome || 'esse lead') });
+  const gestores = await db.select({ id: perfis.id }).from(perfis).where(and(eq(perfis.imobiliariaId, ex.imobiliariaId), inArray(perfis.role, ['dono', 'gerente'])));
+  if (gestores.length) {
+    await db.insert(notificacoes).values(gestores.map(g => ({ perfilId: g.id, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado (falha de envio) — lead: ' + (l?.nome || 'sem nome') })));
+  }
+  await devolverPraTarefas(io, ex);
+  avisarMudou(io, ex.imobiliariaId, ex.leadId);
 }

@@ -79,7 +79,7 @@ export function leadsRouter(io: SocketServer) {
     registrarEvento(imobiliariaId, row.id, 'criado', 'Lead cadastrado manualmente (canal ' + row.canal + ')', nome);
     io.to('imobiliaria:' + imobiliariaId).emit('lead:created', row);
     res.status(201).json(row);
-    if (row.corretorId) void dispararGatilhoLeadNovo(io, imobiliariaId, row.id, row.corretorId);
+    if (row.corretorId) void dispararGatilhoLeadNovo(io, imobiliariaId, row.id, row.corretorId, true); // cadastrado à mão: não liga o robô sozinho (v1)
   });
 
   // Mover de coluna com as travas da v1: venda fechada/pendente não mexe, VENDA só pelo registro de

@@ -330,6 +330,13 @@
       "when": 1793238428389,
       "tag": "0046_huge_juggernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793281236320,
+      "tag": "0047_striped_stingray",
+      "breakpoints": true
     }
   ]
 }

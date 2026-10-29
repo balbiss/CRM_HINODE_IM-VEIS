@@ -1,32 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageSquare, Mic, Image as ImageIcon, FileText, Trash2, ArrowUp, ArrowDown, Plus, Upload } from 'lucide-react';
+import { MessageSquare, Mic, Image as ImageIcon, FileText, Trash2, ArrowUp, ArrowDown, Plus, Upload, Video, Archive, Copy, RotateCcw } from 'lucide-react';
 import { useAppStore, type RemoteFluxo, type RemotePassoFluxo, type PassoTipo } from '../store/appStore';
+import { MOTIVOS_DESCARTE_NORMAL } from '../lib/data';
 import { useRoleInfo } from '../lib/selectors';
 import { uploadArquivo } from '../lib/upload';
 
-const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const TIPOS: { v: PassoTipo; label: string; Icon: typeof MessageSquare }[] = [
   { v: 'texto', label: 'Texto', Icon: MessageSquare },
   { v: 'audio', label: 'Áudio', Icon: Mic },
   { v: 'imagem', label: 'Imagem', Icon: ImageIcon },
+  { v: 'video', label: 'Vídeo', Icon: Video },
   { v: 'pdf', label: 'PDF', Icon: FileText },
 ];
 
-const fmtMin = (m: number) => {
-  if (m <= 0) return 'na hora';
-  if (m < 60) return m + ' min';
-  if (m % 1440 === 0) return (m / 1440) + (m / 1440 > 1 ? ' dias' : ' dia');
-  if (m % 60 === 0) return (m / 60) + (m / 60 > 1 ? ' horas' : ' hora');
-  return m + ' min';
-};
-const hhmm = (min: number) => String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
-const minDe = (hhmmStr: string) => { const [h, m] = hhmmStr.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+/** Quando o passo sai (v1). O 1º passo sempre sai na hora; os outros nas levas da manhã e das 16h. */
+const QUANDO: { v: string; label: string; base: 'proxima_leva' | 'passo_anterior'; min: number }[] = [
+  { v: 'leva', label: 'Na próxima leva', base: 'proxima_leva', min: 0 },
+  { v: '1d', label: '1 dia depois', base: 'passo_anterior', min: 1440 },
+  { v: '2d', label: '2 dias depois', base: 'passo_anterior', min: 2880 },
+  { v: '3d', label: '3 dias depois', base: 'passo_anterior', min: 4320 },
+  { v: '7d', label: '7 dias depois', base: 'passo_anterior', min: 10080 },
+];
+const quandoDe = (p: RemotePassoFluxo) => p.baseAtraso === 'proxima_leva' ? 'leva'
+  : (QUANDO.find(q => q.base === 'passo_anterior' && q.min === p.atrasoMinutos)?.v ?? '1d');
+const STATUS_EXEC: Record<string, string> = { ativa: 'rodando', pausada: 'pausado', encerrada: 'encerrado' };
 
 const fieldLabel: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px' };
 const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13, boxSizing: 'border-box' };
 const iconBtn: React.CSSProperties = { border: '1px solid var(--line)', background: 'var(--card)', width: 28, height: 28, borderRadius: 7, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
 
-const ACCEPT: Record<PassoTipo, string> = { texto: '', audio: 'audio/*', imagem: 'image/*', pdf: 'application/pdf' };
+const ACCEPT: Record<PassoTipo, string> = { texto: '', audio: 'audio/*', imagem: 'image/*', video: 'video/*', pdf: 'application/pdf' };
 
 function PassoAnexo({ passo, onChange }: { passo: RemotePassoFluxo; onChange: (p: Partial<RemotePassoFluxo>) => void }) {
   const token = useAppStore(s => s.token);
@@ -59,7 +62,7 @@ function PassoAnexo({ passo, onChange }: { passo: RemotePassoFluxo; onChange: (p
         </div>
       ) : (
         <button type="button" onClick={() => ref.current?.click()} disabled={enviando} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'center', padding: '10px', border: '1px dashed var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>
-          <Upload size={13} /> {enviando ? 'Enviando…' : 'Enviar ' + (passo.tipo === 'imagem' ? 'imagem' : passo.tipo === 'audio' ? 'áudio' : 'PDF')}
+          <Upload size={13} /> {enviando ? 'Enviando…' : 'Enviar ' + (passo.tipo === 'imagem' ? 'imagem' : passo.tipo === 'audio' ? 'áudio' : passo.tipo === 'video' ? 'vídeo' : 'PDF')}
         </button>
       )}
     </div>
@@ -68,15 +71,12 @@ function PassoAnexo({ passo, onChange }: { passo: RemotePassoFluxo; onChange: (p
 
 interface Rascunho {
   nome: string; ativo: boolean; disparaEmLeadNovo: boolean;
-  janelaInicioMin: number; janelaFimMin: number; janelaDias: boolean[];
-  aoEsgotar: 'nada' | 'descartar' | 'mover'; aoEsgotarColunaId: string | null;
+  aoEsgotar: 'nada' | 'descartar' | 'mover'; aoEsgotarColunaId: string | null; motivoDescarteEsgotar: string;
   passos: RemotePassoFluxo[];
 }
 const doFluxo = (f: RemoteFluxo): Rascunho => ({
   nome: f.nome, ativo: f.ativo, disparaEmLeadNovo: f.disparaEmLeadNovo,
-  janelaInicioMin: f.janelaInicioMin, janelaFimMin: f.janelaFimMin,
-  janelaDias: Array.isArray(f.janelaDias) && f.janelaDias.length === 7 ? [...f.janelaDias] : [false, true, true, true, true, true, false],
-  aoEsgotar: f.aoEsgotar, aoEsgotarColunaId: f.aoEsgotarColunaId,
+  aoEsgotar: f.aoEsgotar, aoEsgotarColunaId: f.aoEsgotarColunaId, motivoDescarteEsgotar: f.motivoDescarteEsgotar || 'Sem Resposta',
   passos: f.passos.map(p => ({ ...p })),
 });
 
@@ -90,6 +90,13 @@ export default function Followup() {
   const atualizarFluxo = useAppStore(s => s.atualizarFluxo);
   const salvarPassos = useAppStore(s => s.salvarPassos);
   const excluirFluxo = useAppStore(s => s.excluirFluxo);
+  const copiarFluxo = useAppStore(s => s.copiarFluxo);
+  const arquivados = useAppStore(s => s.fluxosArquivados);
+  const fetchArquivados = useAppStore(s => s.fetchFluxosArquivados);
+  const automatico = useAppStore(s => s.followupAutomaticoAtivo);
+  const setAutomatico = useAppStore(s => s.setFollowupAutomatico);
+  const souDono = useAppStore(s => s.me?.role === 'dono');
+  const [verArquivados, setVerArquivados] = useState(false);
   const mudarExecucao = useAppStore(s => s.mudarExecucao);
   const fetchFollowup = useAppStore(s => s.fetchFollowup);
   const openLead = useAppStore(s => s.openLead);
@@ -103,7 +110,8 @@ export default function Followup() {
   const meId = perfis.find(p => p.nome === meNome)?.id;
   const corretorAtivo = isManager ? corretorSel : (meId ?? '');
 
-  const fluxosDoCorretor = fluxos.filter(f => (isManager ? (corretorAtivo ? f.corretorId === corretorAtivo : true) : f.corretorId === meId));
+  // corretor vê os dele + os modelos da imobiliária (sem dono), que ele copia com "Usar como base"
+  const fluxosDoCorretor = fluxos.filter(f => (isManager ? (corretorAtivo ? f.corretorId === corretorAtivo || !f.corretorId : true) : f.corretorId === meId || !f.corretorId));
   const [fluxoIdSel, setFluxoIdSel] = useState<string | null>(null);
   const fluxo = fluxos.find(f => f.id === fluxoIdSel) ?? fluxosDoCorretor[0] ?? null;
 
@@ -131,9 +139,10 @@ export default function Followup() {
   const addPasso = () => {
     patch({
       passos: [...(rasc?.passos ?? []), {
-        tipo: 'texto', conteudo: 'Oi {{primeiro_nome}}, aqui é o {{corretor}}. ',
-        atrasoMinutos: rasc?.passos.length ? 1440 : 0, atrasoTexto: rasc?.passos.length ? '1 dia' : 'na hora',
-        cadenciaLabel: 'Chamada ' + ((rasc?.passos.length ?? 0) + 1), anexoUrl: null, anexoNome: null,
+        tipo: 'texto', conteudo: rasc?.passos.length ? '' : 'Oi {nome}, aqui é {corretor}. ',
+        baseAtraso: rasc?.passos.length ? 'proxima_leva' : 'inscricao', atrasoMinutos: 0,
+        atrasoTexto: rasc?.passos.length ? 'na próxima leva' : 'na hora', soHorarioComercial: false,
+        cadenciaLabel: null, anexoUrl: null, anexoNome: null,
       }],
     });
   };
@@ -142,14 +151,14 @@ export default function Followup() {
     if (!fluxo || !rasc) return;
     await atualizarFluxo(fluxo.id, {
       nome: rasc.nome, ativo: rasc.ativo, disparaEmLeadNovo: rasc.disparaEmLeadNovo,
-      janelaInicioMin: rasc.janelaInicioMin, janelaFimMin: rasc.janelaFimMin, janelaDias: rasc.janelaDias,
       aoEsgotar: rasc.aoEsgotar, aoEsgotarColunaId: rasc.aoEsgotar === 'mover' ? rasc.aoEsgotarColunaId : null,
+      motivoDescarteEsgotar: rasc.motivoDescarteEsgotar,
     });
-    await salvarPassos(fluxo.id, rasc.passos.map(p => ({
-      ...p,
-      atrasoMinutos: Math.max(0, Math.round(p.atrasoMinutos)),
-      atrasoTexto: fmtMin(Math.max(0, Math.round(p.atrasoMinutos))),
-    })));
+    await salvarPassos(fluxo.id, rasc.passos.map((p, i) => {
+      if (i === 0) return { ...p, baseAtraso: 'inscricao' as const, atrasoMinutos: 0, atrasoTexto: 'na hora' };
+      const q = QUANDO.find(x => x.v === quandoDe(p))!;
+      return { ...p, baseAtraso: q.base, atrasoMinutos: q.min, atrasoTexto: q.label.toLowerCase() };
+    }));
     setDirty(false);
   }
 
@@ -171,9 +180,22 @@ export default function Followup() {
         <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Automação</p>
         <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>Follow-up Automático</h1>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '6px 0 0', maxWidth: 640, lineHeight: 1.5 }}>
-          Cada corretor monta as próprias réguas. A que estiver marcada como “disparar em lead novo” começa sozinha
-          quando um lead cai pra ele — checando antes se o número existe no WhatsApp. Quando o lead responde, a régua pausa.
+          A 1ª mensagem sai na hora que o lead chega pro corretor; as outras saem nas levas da manhã (a partir de 9h30) e
+          das 16h — sábado até 15h, domingo nada — com 40 a 60 segundos entre mensagens do mesmo corretor. O robô para
+          sozinho quando o cliente responde, quando você manda mensagem manual ou tira o card da coluna FOLLOW-UP
+          AUTOMÁTICO. Se a 1ª mensagem não sair em 24h (WhatsApp desconectado), o follow-up é cancelado e você é avisado.
         </p>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', border: '1px solid ' + (automatico ? 'var(--olive)' : 'var(--line)'), borderRadius: 10, padding: '11px 14px', marginBottom: 16, background: 'var(--card)' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: automatico ? 'var(--olive)' : 'var(--muted)' }} />
+        <span style={{ flex: 1, minWidth: 220, fontSize: 13 }}>
+          <strong>Follow-up automático da imobiliária: {automatico ? 'ligado' : 'desligado'}.</strong>{' '}
+          <span style={{ color: 'var(--muted)' }}>{automatico ? 'Os fluxos "Geral" disparam sozinhos quando o lead ganha corretor.' : 'Os fluxos "Geral" ficam prontos mas não disparam sozinhos (o "Iniciar follow-up" no card continua funcionando).'}</span>
+        </span>
+        {souDono && (
+          <button onClick={() => setAutomatico(!automatico)} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 12.5, fontWeight: 600 }}>{automatico ? 'Desligar' : 'Ligar'}</button>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 22, borderBottom: '1px solid var(--line)', marginBottom: 18 }}>
@@ -198,7 +220,7 @@ export default function Followup() {
                   : e.proximoEnvioEm ? 'próx. ' + new Date(e.proximoEnvioEm).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
                   : '—'}
               </span>
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', padding: '3px 8px', borderRadius: 20, background: e.status === 'ativa' ? 'var(--oliveSoft)' : 'var(--terraSoft)', color: e.status === 'ativa' ? 'var(--olive)' : 'var(--terra)' }}>{e.status}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', padding: '3px 8px', borderRadius: 20, background: e.status === 'ativa' ? 'var(--oliveSoft)' : 'var(--terraSoft)', color: e.status === 'ativa' ? 'var(--olive)' : 'var(--terra)' }}>{STATUS_EXEC[e.status] ?? e.status}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 {e.status === 'ativa'
                   ? <button onClick={() => mudarExecucao(e.id, 'pausada')} style={{ ...iconBtn, width: 'auto', padding: '0 10px', fontSize: 12, fontWeight: 600 }}>Pausar</button>
@@ -231,7 +253,10 @@ export default function Followup() {
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: f.ativo ? 'var(--olive)' : 'var(--muted)', flex: 'none' }} />
                       <span style={{ fontSize: 13, fontWeight: 700, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nome}</span>
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{f.passos.length} passo{f.passos.length === 1 ? '' : 's'}{f.disparaEmLeadNovo ? ' · auto' : ''}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{f.passos.length} passo{f.passos.length === 1 ? '' : 's'}{f.disparaEmLeadNovo ? ' · Geral' : ''}{!f.corretorId ? ' · Modelo' : ''}{f.campanha ? ' · campanha' : ''}</span>
+                    {!f.corretorId && (
+                      <span onClick={ev => { ev.stopPropagation(); void copiarFluxo(f.id).then(n => { if (n) setFluxoIdSel(n.id); }); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontSize: 11, fontWeight: 600, color: 'var(--terra)' }}><Copy size={11} /> Usar como base</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -239,6 +264,20 @@ export default function Followup() {
               <input value={novoNome} onChange={e => setNovoNome(e.target.value)} onKeyDown={e => e.key === 'Enter' && criar()} placeholder="Ex: Boas-vindas" style={{ ...inp, marginBottom: 8 }} />
               <button onClick={criar} disabled={isManager && !corretorAtivo} style={{ width: '100%', padding: '9px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600, opacity: isManager && !corretorAtivo ? 0.5 : 1 }}>+ Criar fluxo</button>
               {isManager && !corretorAtivo && <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 0' }}>Escolha um corretor pra criar.</p>}
+              <button onClick={() => { setVerArquivados(v => !v); void fetchArquivados(); }} style={{ marginTop: 12, width: '100%', padding: '7px', border: 'none', background: 'none', fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                <Archive size={12} /> {verArquivados ? 'Esconder arquivados' : 'Ver arquivados'}
+              </button>
+              {verArquivados && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                  {arquivados.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>Nenhum arquivado.</p>}
+                  {arquivados.map(f => (
+                    <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', border: '1px dashed var(--line)', borderRadius: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nome}</span>
+                      <button title="Restaurar (volta desativado)" onClick={() => atualizarFluxo(f.id, { arquivado: false })} style={iconBtn}><RotateCcw size={12} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -254,35 +293,28 @@ export default function Followup() {
                       </span>
                       {rasc.ativo ? 'Ativo' : 'Inativo'}
                     </button>
-                    <button onClick={() => ask('Excluir fluxo "' + fluxo.nome + '"?', 'Os passos e o histórico de execuções somem.', 'Excluir', () => { excluirFluxo(fluxo.id); setFluxoIdSel(null); })} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={13} /></button>
+                    <button title="Arquivar (para de disparar, fica guardado)" onClick={() => ask('Arquivar "' + fluxo.nome + '"?', 'Sai da lista, para de disparar e deixa de ser o Geral. Os passos ficam guardados em "Ver arquivados".', 'Arquivar', () => { void atualizarFluxo(fluxo.id, { arquivado: true }); setFluxoIdSel(null); })} style={iconBtn}><Archive size={13} /></button>
+                    {isManager && <button title="Excluir de vez" onClick={() => ask('Excluir fluxo "' + fluxo.nome + '" de vez?', 'Os passos e o histórico de execuções somem. Pra só tirar de uso, prefira arquivar.', 'Excluir', () => { excluirFluxo(fluxo.id); setFluxoIdSel(null); })} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={13} /></button>}
                   </div>
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 14 }}>
                     <input type="checkbox" checked={rasc.disparaEmLeadNovo} onChange={e => patch({ disparaEmLeadNovo: e.target.checked })} />
-                    Começar sozinho quando um lead novo cai pra este corretor
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>(só um fluxo por corretor)</span>
+                    <strong>Geral</strong> — entra sozinho em todo lead que o corretor receber (roleta ou transferência)
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>(só um Geral por corretor; lead cadastrado à mão não entra sozinho)</span>
                   </label>
-
-                  <p style={fieldLabel}>Janela de envio</p>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-                    <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Só mandar das</span>
-                    <input type="time" value={hhmm(rasc.janelaInicioMin)} onChange={e => patch({ janelaInicioMin: minDe(e.target.value) })} style={{ ...inp, width: 110 }} />
-                    <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>às</span>
-                    <input type="time" value={hhmm(rasc.janelaFimMin)} onChange={e => patch({ janelaFimMin: minDe(e.target.value) })} style={{ ...inp, width: 110 }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                    {DIAS.map((d, i) => (
-                      <button key={i} onClick={() => patch({ janelaDias: rasc.janelaDias.map((v, j) => (j === i ? !v : v)) })} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid ' + (rasc.janelaDias[i] ? 'var(--terra)' : 'var(--line)'), background: rasc.janelaDias[i] ? 'var(--terraSoft)' : 'var(--bg)', color: rasc.janelaDias[i] ? 'var(--terra)' : 'var(--muted)', fontSize: 12, fontWeight: 600 }}>{d}</button>
-                    ))}
-                  </div>
 
                   <p style={fieldLabel}>Quando a régua terminar</p>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <select value={rasc.aoEsgotar} onChange={e => patch({ aoEsgotar: e.target.value as Rascunho['aoEsgotar'] })} style={{ ...inp, width: 200 }}>
                       <option value="nada">Não fazer nada</option>
-                      <option value="descartar">Descartar o lead (rebatidas)</option>
+                      <option value="descartar">Descartar o lead</option>
                       <option value="mover">Mover pra uma coluna</option>
                     </select>
+                    {rasc.aoEsgotar === 'descartar' && (
+                      <select value={rasc.motivoDescarteEsgotar} onChange={e => patch({ motivoDescarteEsgotar: e.target.value })} style={{ ...inp, width: 220 }}>
+                        {MOTIVOS_DESCARTE_NORMAL.map(m => <option key={m} value={m}>Motivo: {m}</option>)}
+                      </select>
+                    )}
                     {rasc.aoEsgotar === 'mover' && (
                       <select value={rasc.aoEsgotarColunaId ?? ''} onChange={e => patch({ aoEsgotarColunaId: e.target.value || null })} style={{ ...inp, width: 200 }}>
                         <option value="">Escolha a coluna…</option>
@@ -295,7 +327,7 @@ export default function Followup() {
                 <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', padding: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <p style={fieldLabel}>Passos da régua</p>
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Variáveis: {'{{nome}} {{primeiro_nome}} {{corretor}} {{imobiliaria}} {{imovel}}'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Variáveis: {'{nome} {corretor} {origem} {bairro} {imovel_titulo} {imovel_preco} {imovel_foto}'}</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {rasc.passos.map((p, i) => {
@@ -307,34 +339,21 @@ export default function Followup() {
                             <select value={p.tipo} onChange={e => patchPasso(i, { tipo: e.target.value as PassoTipo })} style={{ ...inp, width: 110, padding: '6px 8px' }}>
                               {TIPOS.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
                             </select>
-                            <span style={{ fontSize: 12, color: 'var(--muted)' }}>enviar</span>
-                            <input type="number" min={0} value={p.atrasoMinutos >= 1440 && p.atrasoMinutos % 1440 === 0 ? p.atrasoMinutos / 1440 : p.atrasoMinutos >= 60 && p.atrasoMinutos % 60 === 0 ? p.atrasoMinutos / 60 : p.atrasoMinutos}
-                              onChange={e => {
-                                const n = Math.max(0, Number(e.target.value) || 0);
-                                const unidade = p.atrasoMinutos >= 1440 && p.atrasoMinutos % 1440 === 0 ? 1440 : p.atrasoMinutos >= 60 && p.atrasoMinutos % 60 === 0 ? 60 : 1;
-                                patchPasso(i, { atrasoMinutos: n * unidade });
-                              }}
-                              style={{ ...inp, width: 64, padding: '6px 8px' }} />
-                            <select
-                              value={p.atrasoMinutos >= 1440 && p.atrasoMinutos % 1440 === 0 ? 'd' : p.atrasoMinutos >= 60 && p.atrasoMinutos % 60 === 0 ? 'h' : 'm'}
-                              onChange={e => {
-                                const cur = p.atrasoMinutos >= 1440 && p.atrasoMinutos % 1440 === 0 ? p.atrasoMinutos / 1440 : p.atrasoMinutos >= 60 && p.atrasoMinutos % 60 === 0 ? p.atrasoMinutos / 60 : p.atrasoMinutos;
-                                const mult = e.target.value === 'd' ? 1440 : e.target.value === 'h' ? 60 : 1;
-                                patchPasso(i, { atrasoMinutos: cur * mult });
-                              }}
-                              style={{ ...inp, width: 90, padding: '6px 8px' }}
-                            >
-                              <option value="m">minutos</option>
-                              <option value="h">horas</option>
-                              <option value="d">dias</option>
-                            </select>
-                            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{i === 0 ? 'após o lead cair' : 'após o passo anterior'} · {fmtMin(p.atrasoMinutos)}</span>
+                            {i === 0 ? (
+                              <span style={{ fontSize: 12, color: 'var(--muted)' }}>sai <strong>na hora</strong> que o lead chega pro corretor</span>
+                            ) : (
+                              <select value={quandoDe(p)} onChange={e => { const q = QUANDO.find(x => x.v === e.target.value)!; patchPasso(i, { baseAtraso: q.base, atrasoMinutos: q.min }); }} style={{ ...inp, width: 170, padding: '6px 8px' }}>
+                                {QUANDO.map(q => <option key={q.v} value={q.v}>{q.label}</option>)}
+                              </select>
+                            )}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--muted)' }}>
+                              <input type="checkbox" checked={!!p.soHorarioComercial} onChange={e => patchPasso(i, { soHorarioComercial: e.target.checked })} /> só seg–sáb 8h–20h
+                            </label>
                             <span style={{ flex: 1 }} />
                             <button onClick={() => moverPasso(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.4 : 1 }}><ArrowUp size={12} /></button>
                             <button onClick={() => moverPasso(i, 1)} disabled={i === rasc.passos.length - 1} style={{ ...iconBtn, opacity: i === rasc.passos.length - 1 ? 0.4 : 1 }}><ArrowDown size={12} /></button>
                             <button onClick={() => { patch({ passos: rasc.passos.filter((_, j) => j !== i) }); }} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={12} /></button>
                           </div>
-                          <input value={p.cadenciaLabel ?? ''} onChange={e => patchPasso(i, { cadenciaLabel: e.target.value || null })} placeholder="Rótulo da cadência (ex: Chamada 1) — some no card do lead" style={{ ...inp, marginBottom: 8, fontSize: 12 }} />
                           {p.tipo === 'texto' ? (
                             <textarea value={p.conteudo} onChange={e => patchPasso(i, { conteudo: e.target.value })} rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Mensagem…" />
                           ) : (
@@ -357,7 +376,7 @@ export default function Followup() {
                   {dirty && <span style={{ fontSize: 12, color: 'var(--muted)' }}>alterações não salvas</span>}
                   <span style={{ flex: 1 }} />
                   {pill(rasc.ativo ? 'ativo' : 'inativo', rasc.ativo)}
-                  {rasc.disparaEmLeadNovo && pill('auto em lead novo', true)}
+                  {rasc.disparaEmLeadNovo && pill('Geral', true)}
                 </div>
               </div>
             ) : (

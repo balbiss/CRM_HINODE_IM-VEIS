@@ -72,6 +72,8 @@ export const imobiliarias = pgTable('imobiliarias', {
   diasCarencia: integer('dias_carencia').notNull().default(5),
   // Quantas rebatidas cada corretor pode puxar do bolsão por dia (0 = ilimitado).
   limiteRebatidasDia: integer('limite_rebatidas_dia').notNull().default(5),
+  // v1: liga/desliga, pra imobiliária inteira, o disparo automático de follow-up (fluxo Geral / da campanha).
+  followupAutomaticoAtivo: boolean('followup_automatico_ativo').notNull().default(false),
   observacoes: text('observacoes'),
   // Dados cadastrais que a própria imobiliária edita em Ajustes → Imobiliária.
   cnpj: text('cnpj'),
@@ -573,6 +575,15 @@ export const followupFluxos = pgTable('followup_fluxos', {
   janelaDias: jsonb('janela_dias').notNull().default([false, true, true, true, true, true, false]),
   aoEsgotar: aoEsgotarEnum('ao_esgotar').notNull().default('nada'),
   aoEsgotarColunaId: uuid('ao_esgotar_coluna_id').references(() => colunasKanban.id, { onDelete: 'set null' }),
+  // --- regras da v1 ---
+  okaId: uuid('oka_id').unique(),
+  // "Geral": dispara sozinho pra todo lead que ganha esse corretor (v1: e_geral). disparaEmLeadNovo é o mesmo flag.
+  // Fluxo da campanha (sem corretor): vale pra todo lead cuja campanha/origem é exatamente essa.
+  campanha: text('campanha'),
+  motivoDescarteEsgotar: text('motivo_descarte_esgotar').notNull().default('Sem Resposta'),
+  arquivadoEm: timestamp('arquivado_em', { withTimezone: true }),
+  // estado que o fluxo tinha na v1 — a importação traz desligado e liga na virada
+  ativoNaV1: boolean('ativo_na_v1'),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   corretorIdx: index('followup_fluxos_corretor_id_idx').on(table.corretorId),
@@ -591,6 +602,14 @@ export const followupPassos = pgTable('followup_passos', {
   atrasoTexto: text('atraso_texto').notNull().default('na hora'),
   // Rótulo de cadência ("Chamada 1", "Chamada 2"…) — ao enviar o passo, grava em `leads.cadencia`.
   cadenciaLabel: text('cadencia_label'),
+  // --- regras da v1 ---
+  okaId: uuid('oka_id').unique(),
+  // 'inscricao' (conta de quando entrou) | 'passo_anterior' (de quando saiu o anterior) | 'proxima_leva'
+  baseAtraso: text('base_atraso').notNull().default('passo_anterior'),
+  soHorarioComercial: boolean('so_horario_comercial').notNull().default(false),
+  dataHoraFixa: timestamp('data_hora_fixa', { withTimezone: true }),
+  anexoTipo: text('anexo_tipo'),
+  anexoMimetype: text('anexo_mimetype'),
 }, table => ({
   fluxoIdx: index('followup_passos_fluxo_id_idx').on(table.fluxoId),
 }));
@@ -606,6 +625,16 @@ export const followupExecucoes = pgTable('followup_execucoes', {
   proximoEnvioEm: timestamp('proximo_envio_em', { withTimezone: true }),
   motivoFim: text('motivo_fim'),
   iniciadoEm: timestamp('iniciado_em', { withTimezone: true }).notNull().defaultNow(),
+  // --- motor da v1 ---
+  okaId: uuid('oka_id').unique(),
+  iniciadoPor: text('iniciado_por').notNull().default('manual'), // 'manual' | 'automatico'
+  // detalhe do fim (v1): respondeu | pausado_corretor | parado_lead | concluido | encerrado_manual | erro
+  resultado: text('resultado'),
+  tentativasErro: integer('tentativas_erro').notNull().default(0),
+  reservadoEm: timestamp('reservado_em', { withTimezone: true }),
+  enviandoPasso: integer('enviando_passo'),
+  enviandoDesde: timestamp('enviando_desde', { withTimezone: true }),
+  finalizadoEm: timestamp('finalizado_em', { withTimezone: true }),
 }, table => ({
   leadIdx: index('followup_execucoes_lead_id_idx').on(table.leadId),
   corretorIdx: index('followup_execucoes_corretor_id_idx').on(table.corretorId),
@@ -613,12 +642,36 @@ export const followupExecucoes = pgTable('followup_execucoes', {
   umaVivaPorLead: uniqueIndex('followup_execucoes_lead_viva_uq').on(table.leadId).where(sql`status <> 'encerrada'`),
 }));
 
+/** Cada mensagem que o robô mandou (v1: followup_envios) — base do "em qual mensagem o cliente responde". */
+export const followupEnvios = pgTable('followup_envios', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  execucaoId: uuid('execucao_id').notNull().references(() => followupExecucoes.id, { onDelete: 'cascade' }),
+  passoOrdem: integer('passo_ordem').notNull(),
+  conteudoEnviado: text('conteudo_enviado'),
+  waMessageId: text('wa_message_id'),
+  mensagemId: uuid('mensagem_id'),
+  respondeuApos: boolean('respondeu_apos').notNull().default(false),
+  okaId: uuid('oka_id').unique(),
+  enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  execIdx: index('followup_envios_execucao_id_idx').on(table.execucaoId),
+}));
+
+/** Ritmo por corretor: a próxima mensagem automática dele só sai depois de liberadoEm (40–60s). */
+export const followupRitmoCorretor = pgTable('followup_ritmo_corretor', {
+  corretorId: uuid('corretor_id').primaryKey().references(() => perfis.id, { onDelete: 'cascade' }),
+  liberadoEm: timestamp('liberado_em', { withTimezone: true }).notNull(),
+});
+
 export const templatesMensagem = pgTable('templates_mensagem', {
   id: uuid('id').primaryKey().defaultRandom(),
   criadoPor: uuid('criado_por').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
   titulo: text('titulo').notNull(),
   texto: text('texto').notNull(),
   anexoUrl: text('anexo_url'),
+  // v1: vários anexos por mensagem pronta [{ url, nome, tipo }] (o anexoUrl fica com o 1º)
+  anexos: jsonb('anexos').$type<{ url: string; nome?: string; tipo?: string }[]>().notNull().default([]),
+  okaId: uuid('oka_id').unique(),
 });
 
 export const imoveis = pgTable('imoveis', {
@@ -652,6 +705,9 @@ export const imoveis = pgTable('imoveis', {
   // Nomes com que o imóvel aparece no nome das campanhas de anúncio (ex.: "CENARIUM" em
   // "[NC 02][CENARIUM][FORM]"): o lead que chega dessa campanha já vem ligado a este imóvel.
   nomesCampanha: jsonb('nomes_campanha').$type<string[]>().notNull().default([]),
+  // v1: o follow-up puxa foto/título/preço do imóvel cuja referência é igual à origem do lead
+  referenciaAnuncio: text('referencia_anuncio'),
+  okaId: uuid('oka_id').unique(),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -668,6 +724,7 @@ export const sites = pgTable('sites', {
 
 export const linksUteis = pgTable('links_uteis', {
   id: uuid('id').primaryKey().defaultRandom(),
+  okaId: uuid('oka_id').unique(),
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
   categoria: text('categoria').notNull(),
   titulo: text('titulo').notNull(),
@@ -676,6 +733,7 @@ export const linksUteis = pgTable('links_uteis', {
 
 export const treinamentos = pgTable('treinamentos', {
   id: uuid('id').primaryKey().defaultRandom(),
+  okaId: uuid('oka_id').unique(),
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
   titulo: text('titulo').notNull(),
   descricao: text('descricao'),

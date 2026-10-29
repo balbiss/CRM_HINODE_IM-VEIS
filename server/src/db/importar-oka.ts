@@ -34,19 +34,29 @@ async function supa<T = any>(query: string, tentativa = 1): Promise<T[]> {
   return json;
 }
 
-/** Lê uma tabela inteira da v1 em páginas (keyset por created_at,id), sem estourar a resposta da API. */
-async function supaTudo<T = any>(cols: string, from: string, ordem = 'created_at', pagina = 5000): Promise<T[]> {
-  const out: T[] = [];
+/** Percorre uma tabela da v1 em páginas (keyset por data,id), entregando cada página pra `fn` — nunca
+ *  guarda a tabela inteira na memória (o container do backend tem pouca RAM; 75 mil mensagens de uma
+ *  vez derrubavam o processo). */
+async function porPagina(cols: string, from: string, ordem: string, fn: (rows: any[]) => Promise<void>, pagina = 2000) {
   let cursor: { t: string; id: string } | null = null;
+  let total = 0;
   for (;;) {
     const where: string = cursor ? `where (${ordem}, id) > ('${cursor.t}'::timestamptz, '${cursor.id}'::uuid)` : '';
     const rows: any[] = await supa<any>(`select ${cols}, ${ordem} as __ord, id as __id from ${from} ${where} order by ${ordem}, id limit ${pagina}`);
-    out.push(...rows);
+    if (rows.length) await fn(rows);
+    total += rows.length;
+    process.stdout.write(`    ${from}: ${total}\r`);
     if (rows.length < pagina) break;
     const ult: any = rows[rows.length - 1];
     cursor = { t: ult.__ord, id: ult.__id };
-    process.stdout.write(`    ${from}: ${out.length}\r`);
   }
+  console.log(`    ${from}: ${total} lidos           `);
+}
+
+/** Tabela inteira na memória — só pras pequenas/médias (leads, descartes, compromissos, follow-up). */
+async function supaTudo<T = any>(cols: string, from: string, ordem = 'created_at', pagina = 5000): Promise<T[]> {
+  const out: T[] = [];
+  await porPagina(cols, from, ordem, async rows => { out.push(...rows); }, pagina);
   return out;
 }
 
@@ -102,6 +112,7 @@ const ts = (v: any) => (v ? new Date(String(v).replace(" ", "T").replace(/([+-]\
 
 /** insert em lote com upsert pelo oka_id (ou "do nothing" em qualquer conflito). */
 async function upsert(tabela: string, rows: Record<string, unknown>[], atualizar: string[] | 'nada', alvo = '(oka_id)') {
+  if (!rows.length) return;
   const LOTE = 500;
   let n = 0;
   for (let i = 0; i < rows.length; i += LOTE) {
@@ -252,7 +263,7 @@ async function main() {
   // ---------- Mensagens ----------
   if (etapa('mensagens')) {
     console.log('Mensagens de WhatsApp...');
-    const msgs = await supaTudo(`lead_id, corretor_id, conteudo, direcao, status, whatsapp_message_id, tipo, lida, canal, wa_chave`, 'mensagens_whatsapp');
+    await porPagina(`lead_id, corretor_id, conteudo, direcao, status, whatsapp_message_id, tipo, lida, canal, wa_chave`, 'mensagens_whatsapp', 'created_at', async msgs => {
     const rows = msgs.filter((m: any) => leadId(m.lead_id)).map((m: any) => {
       const a = separarAnexo(m.conteudo, m.tipo);
       const saida = m.direcao === 'outbound';
@@ -266,36 +277,34 @@ async function main() {
       };
     });
     // "do nothing": a mesma mensagem não entra 2x (oka_id, wa_message_id e wa_chave são únicos)
-    await upsert('mensagens_whatsapp', rows, 'nada');
+    if (rows.length) await upsert('mensagens_whatsapp', rows, 'nada');
+    });
   }
 
   // ---------- Histórico do card ----------
   if (etapa('historico')) {
     console.log('Histórico dos cards...');
-    const inter = await supaTudo(`lead_id, autor_id, tipo, conteudo`, 'leads_interacoes');
-    await upsert('eventos_lead', inter.filter((i: any) => leadId(i.lead_id)).map((i: any) => ({
+    await porPagina(`lead_id, autor_id, tipo, conteudo`, 'leads_interacoes', 'created_at', async inter => upsert('eventos_lead', inter.filter((i: any) => leadId(i.lead_id)).map((i: any) => ({
       oka_id: i.__id, imobiliaria_id: imobiliariaId, lead_id: leadId(i.lead_id),
       tipo: i.tipo === 'nota' ? 'nota' : i.tipo === 'descarte' ? 'descarte' : 'oka_' + i.tipo,
       descricao: i.conteudo ?? '', ator_nome: i.autor_id ? perfilPorOka.get(i.autor_id)?.nome ?? null : null, criado_em: ts(i.__ord),
-    })), 'nada');
-    const hist = await supaTudo(`lead_id, corretor_id, removido_em, motivo`, 'lead_historico_corretores', 'atribuido_em');
-    await upsert('eventos_lead', hist.filter((h: any) => leadId(h.lead_id)).map((h: any) => ({
+    })), 'nada'));
+    await porPagina(`lead_id, corretor_id, removido_em, motivo`, 'lead_historico_corretores', 'atribuido_em', async hist => upsert('eventos_lead', hist.filter((h: any) => leadId(h.lead_id)).map((h: any) => ({
       oka_id: h.__id, imobiliaria_id: imobiliariaId, lead_id: leadId(h.lead_id), tipo: 'distribuido',
       descricao: 'Atribuído a ' + (perfilPorOka.get(h.corretor_id)?.nome ?? 'corretor') + (h.motivo ? ' (' + h.motivo + ')' : '')
         + (h.removido_em ? ' — saiu em ' + new Date(h.removido_em).toLocaleDateString('pt-BR') : ''),
       ator_nome: null, criado_em: ts(h.__ord),
-    })), 'nada');
+    })), 'nada'));
   }
 
   // ---------- Tarefas, descartes, compromissos, campanhas, roleta ----------
   if (etapa('tarefas')) {
     console.log('Tarefas (lembretes)...');
-    const lemb = await supaTudo(`lead_id, corretor_id, datetime, observacao, concluido`, 'lembretes_followup');
-    await upsert('tarefas', lemb.map((t: any) => ({
+    await porPagina(`lead_id, corretor_id, datetime, observacao, concluido`, 'lembretes_followup', 'created_at', async lemb => upsert('tarefas', lemb.map((t: any) => ({
       oka_id: t.__id, imobiliaria_id: imobiliariaId, lead_id: leadId(t.lead_id), corretor_id: perfilId(t.corretor_id),
       titulo: 'Retornar contato', descricao: t.observacao, vence_em: ts(t.datetime) ?? ts(t.__ord),
       concluida: !!t.concluido, avisada: true, criado_em: ts(t.__ord),
-    })), ['lead_id', 'corretor_id', 'descricao', 'vence_em', 'concluida']);
+    })), ['lead_id', 'corretor_id', 'descricao', 'vence_em', 'concluida']));
   }
   if (etapa('descartes')) {
     console.log('Descartes...');
@@ -327,16 +336,118 @@ async function main() {
     // sem chave única pra deduplicar: na 2ª rodada traz só o que é mais novo que o último já importado
     const [ult] = await sql`select max(criado_em) m from distribuicao_log where origem like 'oka:%'`;
     const desde = ult?.m ? new Date(ult.m).getTime() : 0;
-    const dist = await supaTudo(`lead_id, corretor_id, tipo`, 'distribuicao_log');
-    await upsert('distribuicao_log', dist.filter((d: any) => leadId(d.lead_id) && perfilId(d.corretor_id) && new Date(ts(d.__ord)!).getTime() > desde)
-      .map((d: any) => ({
-        imobiliaria_id: imobiliariaId, lead_id: leadId(d.lead_id), corretor_id: perfilId(d.corretor_id),
-        origem: 'oka:' + (d.tipo ?? 'roleta'), criado_em: ts(d.__ord),
-      })), 'nada');
+    await porPagina(`lead_id, corretor_id, tipo`, 'distribuicao_log', 'created_at', async dist => {
+      const rows = dist.filter((d: any) => leadId(d.lead_id) && perfilId(d.corretor_id) && new Date(ts(d.__ord)!).getTime() > desde)
+        .map((d: any) => ({
+          imobiliaria_id: imobiliariaId, lead_id: leadId(d.lead_id), corretor_id: perfilId(d.corretor_id),
+          origem: 'oka:' + (d.tipo ?? 'roleta'), criado_em: ts(d.__ord),
+        }));
+      if (rows.length) await upsert('distribuicao_log', rows, 'nada');
+    });
+  }
+
+  // ---------- Mensagens prontas (de cada um) ----------
+  const [dono] = await sql<{ id: string }[]>`select id from perfis where imobiliaria_id = ${imobiliariaId} and role = 'dono' order by criado_em limit 1`;
+  if (etapa('templates')) {
+    console.log('Mensagens prontas...');
+    const tpls = await supa(`select id, titulo, conteudo, criado_por, anexo_url, anexo_tipo, anexo_nome, anexos from templates_mensagem`);
+    await upsert('templates_mensagem', tpls.map((t: any) => {
+      const anexos = Array.isArray(t.anexos) && t.anexos.length ? t.anexos
+        : t.anexo_url ? [{ url: t.anexo_url, nome: t.anexo_nome, tipo: t.anexo_tipo }] : [];
+      return {
+        oka_id: t.id, criado_por: perfilId(t.criado_por) ?? dono?.id, titulo: t.titulo || 'Sem título', texto: t.conteudo ?? '',
+        anexo_url: anexos[0]?.url ?? null, anexos: JSON.stringify(anexos),
+      };
+    }), ['criado_por', 'titulo', 'texto', 'anexo_url', 'anexos']);
+  }
+
+  // ---------- Imóveis, links úteis e treinamentos ----------
+  if (etapa('imoveis')) {
+    console.log('Imóveis, links úteis e treinamentos...');
+    const ims = await supa(`select id, titulo, descricao, tipo, finalidade, preco, endereco, cidade, estado, fotos, area, quartos, banheiros, caracteristicas, referencia_anuncio, created_at from imoveis`);
+    const cap = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Apartamento');
+    await upsert('imoveis', ims.map((i: any) => ({
+      oka_id: i.id, imobiliaria_id: imobiliariaId, titulo: i.titulo, descricao: i.descricao, tipo: cap(i.tipo),
+      finalidade: /alug|loca/i.test(i.finalidade ?? '') ? 'Alugar' : 'Comprar', preco: String(i.preco ?? 0),
+      endereco: i.endereco, cidade: i.cidade, estado: i.estado, area: i.area != null ? String(i.area) : null,
+      quartos: i.quartos ?? 0, banheiros: i.banheiros ?? 0, imagens: JSON.stringify(Array.isArray(i.fotos) ? i.fotos : []),
+      amenidades: JSON.stringify(Array.isArray(i.caracteristicas) ? i.caracteristicas : []), referencia_anuncio: i.referencia_anuncio,
+      criado_em: ts(i.created_at),
+    })), ['titulo', 'descricao', 'tipo', 'finalidade', 'preco', 'endereco', 'cidade', 'estado', 'area', 'quartos', 'banheiros', 'imagens', 'amenidades', 'referencia_anuncio']);
+    const links = await supa(`select id, titulo, url from links_uteis`);
+    await upsert('links_uteis', links.map((l: any) => ({ oka_id: l.id, imobiliaria_id: imobiliariaId, categoria: 'Geral', titulo: l.titulo, url: l.url })), ['titulo', 'url']);
+    const treins = await supa(`select id, titulo, url from treinamentos`);
+    await upsert('treinamentos', treins.map((t: any) => ({ oka_id: t.id, imobiliaria_id: imobiliariaId, titulo: t.titulo, video_url: t.url })), ['titulo', 'video_url']);
+  }
+
+  // ---------- Follow-up: fluxos, passos, execuções e envios ----------
+  // Sem --virada os fluxos entram DESLIGADOS (com o estado da v1 guardado em ativo_na_v1) e os robôs que
+  // estavam rodando entram pausados: a v2 não manda nada enquanto a equipe ainda usa a v1.
+  // Com --virada liga tudo exatamente como estava na v1 (fluxos, Geral, automático da imobiliária).
+  const virada = process.argv.includes('--virada');
+  if (etapa('followup')) {
+    console.log('Follow-up (fluxos, passos, execuções)' + (virada ? ' — VIRADA: ligando como na v1' : ' — fluxos entram desligados') + '...');
+    const fluxos = await supa(`select id, corretor_id, nome, ativo, e_geral, ao_esgotar, motivo_descarte_esgotar, campanha, arquivado_em, created_at from followup_fluxos`);
+    await upsert('followup_fluxos', fluxos.map((f: any) => ({
+      oka_id: f.id, imobiliaria_id: imobiliariaId, corretor_id: perfilId(f.corretor_id), nome: f.nome,
+      ativo: virada ? !!f.ativo && !f.arquivado_em : false, ativo_na_v1: !!f.ativo,
+      dispara_em_lead_novo: virada ? !!f.e_geral : false,
+      ao_esgotar: f.ao_esgotar === 'descartar' ? 'descartar' : 'nada', motivo_descarte_esgotar: f.motivo_descarte_esgotar || 'Sem Resposta',
+      campanha: f.campanha, arquivado_em: ts(f.arquivado_em), criado_em: ts(f.created_at),
+    })), ['corretor_id', 'nome', 'ativo', 'ativo_na_v1', 'dispara_em_lead_novo', 'ao_esgotar', 'motivo_descarte_esgotar', 'campanha', 'arquivado_em']);
+    const fluxoPorOka = new Map((await sql<{ id: string; oka_id: string }[]>`select id, oka_id from followup_fluxos where oka_id is not null`).map(r => [r.oka_id, r.id]));
+
+    const passos = await supa(`select id, fluxo_id, ordem, atraso_minutos, base_atraso, conteudo, so_horario_comercial, data_hora_fixa, anexo_url, anexo_tipo, anexo_nome, anexo_mimetype from followup_passos`);
+    const textoAtraso = (p: any) => p.ordem === 1 ? 'na hora' : p.base_atraso === 'proxima_leva' ? 'na próxima leva'
+      : (p.atraso_minutos % 1440 === 0 ? (p.atraso_minutos / 1440) + ' dia(s) depois' : p.atraso_minutos + ' min depois');
+    const tipoPasso = (t: string | null) => !t ? 'texto' : t === 'documento' || t === 'document' ? 'pdf' : t;
+    await upsert('followup_passos', passos.filter((p: any) => fluxoPorOka.get(p.fluxo_id)).map((p: any) => ({
+      oka_id: p.id, fluxo_id: fluxoPorOka.get(p.fluxo_id), ordem: p.ordem - 1, tipo: tipoPasso(p.anexo_tipo),
+      conteudo: p.conteudo ?? '', anexo_url: p.anexo_url, anexo_nome: p.anexo_nome, anexo_tipo: p.anexo_tipo, anexo_mimetype: p.anexo_mimetype,
+      base_atraso: p.base_atraso || 'passo_anterior', atraso_minutos: p.atraso_minutos ?? 0, atraso_texto: textoAtraso(p),
+      so_horario_comercial: !!p.so_horario_comercial, data_hora_fixa: ts(p.data_hora_fixa),
+    })), ['fluxo_id', 'ordem', 'tipo', 'conteudo', 'anexo_url', 'anexo_nome', 'anexo_tipo', 'anexo_mimetype', 'base_atraso', 'atraso_minutos', 'atraso_texto', 'so_horario_comercial', 'data_hora_fixa']);
+
+    const execs = await supaTudo(`lead_id, fluxo_id, corretor_id, passo_atual, proximo_envio_em, status, finalizado_em, motivo_parada, iniciado_por, tentativas_erro`, 'followup_execucoes', 'inscrito_em');
+    // A v2 só deixa um robô "vivo" (ativo/pausado) por lead: só o mais recente de cada lead pode ficar
+    // vivo; os anteriores (pausados antigos na v1) entram encerrados. Lead que já tem robô criado na
+    // própria v2 também não ganha outro vivo.
+    const ultimoPorLead = new Map<string, string>();
+    for (const e of execs as any[]) ultimoPorLead.set(e.lead_id, e.__id); // execs vem em ordem de início
+    const vivosV2 = new Set((await sql<{ lead_id: string }[]>`select lead_id from followup_execucoes where oka_id is null and status <> 'encerrada'`).map(r => r.lead_id));
+    const statusV2 = (e: any) => {
+      const s = e.status as string;
+      const vivo = s === 'ativo' || s === 'pausado_corretor' || s === 'erro';
+      if (!vivo || ultimoPorLead.get(e.lead_id) !== e.__id || vivosV2.has(leadId(e.lead_id)!)) return 'encerrada';
+      return s === 'ativo' && virada ? 'ativa' : 'pausada';
+    };
+    await upsert('followup_execucoes', execs.filter((e: any) => leadId(e.lead_id) && fluxoPorOka.get(e.fluxo_id)).map((e: any) => ({
+      oka_id: e.__id, imobiliaria_id: imobiliariaId, lead_id: leadId(e.lead_id), fluxo_id: fluxoPorOka.get(e.fluxo_id),
+      corretor_id: perfilId(e.corretor_id), passo_atual: e.passo_atual ?? 0, status: statusV2(e),
+      resultado: e.status === 'ativo' ? (virada ? null : 'aguardando_virada') : e.status,
+      motivo_fim: e.status === 'ativo' && !virada ? 'importado da v1 — liga na virada' : e.motivo_parada,
+      proximo_envio_em: e.status === 'ativo' ? ts(e.proximo_envio_em) : null, iniciado_em: ts(e.__ord),
+      finalizado_em: ts(e.finalizado_em), iniciado_por: e.iniciado_por || 'manual', tentativas_erro: e.tentativas_erro ?? 0,
+    })), ['status', 'resultado', 'motivo_fim', 'proximo_envio_em', 'passo_atual', 'finalizado_em', 'tentativas_erro']);
+    const execPorOka = new Map((await sql<{ id: string; oka_id: string }[]>`select id, oka_id from followup_execucoes where oka_id is not null`).map(r => [r.oka_id, r.id]));
+
+    await porPagina(`execucao_id, passo_ordem, conteudo_enviado, whatsapp_message_id, respondeu_apos`, 'followup_envios', 'enviado_em', async envios => upsert('followup_envios', envios.filter((v: any) => execPorOka.get(v.execucao_id)).map((v: any) => ({
+      oka_id: v.__id, execucao_id: execPorOka.get(v.execucao_id), passo_ordem: v.passo_ordem, conteudo_enviado: v.conteudo_enviado,
+      wa_message_id: v.whatsapp_message_id, respondeu_apos: !!v.respondeu_apos, enviado_em: ts(v.__ord),
+    })), ['respondeu_apos']));
+
+    if (virada) {
+      const [imobV1] = await supa(`select followup_automatico_ativo from imobiliarias limit 1`);
+      await sql`update imobiliarias set followup_automatico_ativo = ${!!imobV1?.followup_automatico_ativo} where id = ${imobiliariaId}`;
+      console.log('    follow-up automático da imobiliária:', !!imobV1?.followup_automatico_ativo ? 'LIGADO' : 'desligado');
+    }
   }
 
   const [tot] = await sql`select (select count(*) from leads)::int leads, (select count(*) from mensagens_whatsapp)::int mensagens,
-    (select count(*) from eventos_lead)::int eventos, (select count(*) from tarefas)::int tarefas, (select count(*) from perfis)::int perfis`;
+    (select count(*) from eventos_lead)::int eventos, (select count(*) from tarefas)::int tarefas, (select count(*) from perfis)::int perfis,
+    (select count(*) from templates_mensagem)::int mensagens_prontas, (select count(*) from followup_fluxos)::int fluxos,
+    (select count(*) from followup_passos)::int passos, (select count(*) from followup_execucoes)::int execucoes_followup,
+    (select count(*) from imoveis)::int imoveis, (select count(*) from links_uteis)::int links, (select count(*) from treinamentos)::int treinamentos`;
   console.log('Pronto:', tot);
 }
 
