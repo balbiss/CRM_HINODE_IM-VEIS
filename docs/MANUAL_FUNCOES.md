@@ -726,6 +726,79 @@ administrador do CRM). O assistente mostra quanto falta; quando acaba, avisa e f
 
 ---
 
+## 16. Card do lead: próximo contato, compromisso, cadência, venda e descarte
+
+**Pra quem:** todos (aprovações: dono e gerente).
+
+### Mudar de coluna
+- Pra **Conversando, Visitou, Cobrar Doc, Pendente, Aprovado, Reprovado, Restrição ou Futuros**, o CRM
+  pede **a data e o horário do próximo contato** na hora de mover (o horário só aparece depois da data).
+- Pra **Agendado ou FID**, pede **a data e o horário do compromisso** (visita ou FID).
+- **VENDA** não aceita arrastar: abre o formulário de venda.
+- Card com venda registrada (esperando aprovação ou já aprovada) não muda mais de coluna.
+
+### Dentro do card (aba Detalhes)
+- **Temperatura** (Quente / Morno / Frio) e **favorito** (estrela).
+- Dados do cliente que **salvam sozinhos** ao sair do campo: telefone alternativo, data de nascimento,
+  bairro de interesse, tipo de imóvel, renda familiar, saldo de FGTS, valor de entrada, link do Drive,
+  referência. Cada mudança entra no **Histórico** do card.
+- **Próximo contato:** mostra a data marcada (em vermelho se atrasou) e deixa reagendar.
+- **Compromisso:** VISITA ou FID com data, horário e status (Agendada, Realizada, Desmarcou,
+  Reagendou, Furou). **Remover compromisso** apaga a data do card e da agenda (fica no histórico).
+- **Cadência de chamada** (Início → Chamada 5): registrou a chamada antes das 13h, o próximo contato vai
+  pras 17h do mesmo dia; a partir das 13h (ou sábado), pras 11h do próximo dia útil. O card vai pra TAREFAS.
+
+### Registrar venda
+Botão **Registrar venda**: valor, **data em que a venda aconteceu** (não aceita data futura),
+empreendimento, unidade e torre. A venda **vai pra aprovação** do dono/gerente; o card só vai pra
+VENDA depois de aprovada e conta nos números **no mês da data informada**.
+
+### Devolver / descartar
+- **Sem Resposta, Parou de Responder, Sem Interesse, Aprovado/Desistiu, Sem Interesse (Renda Baixa):**
+  o lead volta na hora pro bolsão, sem corretor; próximo contato, visita e follow-up são cancelados.
+- **Descadastrar (e variações), Já Comprou (Outra Empresa), Contato Errado:** precisam da
+  **aprovação** do dono/gerente (Descadastrar, Já Comprou e Contato Errado exigem observação). Até lá
+  o lead some do Kanban do corretor. Aprovado, ele sai de vez da roleta e das rebatidas (coluna LEAD
+  DESCADASTRAR); recusado, volta pro corretor.
+
+### Transferir (dono e gerente)
+No card, o campo **Corretor responsável** vira um seletor. Lead sem corretor vai pra LEAD NOVO do
+novo corretor; lead que já era de alguém vai pra REBATIDA do novo corretor. O corretor recebe o aviso
+e o lead já ganha um próximo contato pra hoje.
+
+### Aprovações (menu, dono e gerente)
+Lista as **vendas** e os **descartes** esperando decisão, com o número no menu. Clique no nome pra
+abrir o card; **Aprovar** ou **Rejeitar**.
+
+---
+
+## 17. Follow-up automático (igual ao do CRM antigo)
+
+**Pra quem:** cada corretor monta os dele; o dono liga/desliga o automático da imobiliária.
+**Onde:** menu **Follow-ups**.
+
+- **1ª mensagem na hora** que o lead chega pro corretor (roleta ou transferência).
+- **Da 2ª em diante, só nas levas:** de segunda a sexta, de manhã (a partir de 9h30) e às 16h;
+  sábado até as 15h; domingo nada. Cada passo escolhe **"Na próxima leva"** ou **1, 2, 3 ou 7 dias depois**.
+- Entre uma mensagem e outra do mesmo corretor o sistema espera **40 a 60 segundos** (protege o número).
+- **Geral:** o fluxo marcado como Geral entra sozinho em todo lead que o corretor receber (um Geral por
+  corretor). Lead **cadastrado à mão** não entra sozinho — use **Iniciar follow-up** no card.
+- **Liga/desliga da imobiliária** (topo da tela, só o dono muda): desligado, nenhum Geral dispara sozinho.
+- **O robô para sozinho** quando o cliente responde, quando o corretor manda mensagem manual, quando o
+  card sai da coluna **FOLLOW-UP AUTOMÁTICO**, ou quando o lead é descartado, vendido ou transferido.
+  Enquanto roda, o card fica em FOLLOW-UP AUTOMÁTICO; quando para, volta pra **TAREFAS** com próximo
+  contato pra hoje.
+- **1ª mensagem que não sai em 24h** (WhatsApp desconectado): o follow-up é cancelado e o corretor é avisado.
+- **3 falhas de envio:** o robô trava e avisa o corretor e o dono/gerente.
+- **Ao terminar sem resposta:** pode **descartar o lead** com o motivo escolhido no fluxo.
+- Cada mensagem do robô conta como uma **chamada** na cadência do card.
+- **Variáveis:** {nome} (primeiro nome), {corretor}, {origem}, {bairro}, {imovel_titulo},
+  {imovel_preco} e {imovel_foto} (manda a foto do imóvel cuja referência é igual à campanha do lead).
+- **Arquivar** tira o fluxo de uso sem apagar (**Ver arquivados** traz de volta, desativado).
+  **Usar como base** copia um modelo da imobiliária pra você ajustar.
+
+---
+
 ## Pendências (ainda não existem — não prometer ao cliente)
 
 - **Agente de IA com personalidade diferente por número**: hoje a configuração da IA (prompt,
