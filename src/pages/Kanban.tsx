@@ -8,6 +8,8 @@ import { canalPill } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
 import { LeadAvatar } from '../components/LeadAvatar';
+import { foraDoKanban } from '../lib/remoteLeads';
+import { Flame, Snowflake, Sun } from 'lucide-react';
 
 type ViewMode = 'kanban' | 'lista';
 const corDaColuna = (slug: string | null) => (slug === 'venda' ? 'var(--olive)' : slug === 'novo' || slug === 'rebatida' ? 'var(--muted)' : 'var(--terra)');
@@ -107,9 +109,11 @@ export default function Kanban() {
   }, []);
 
   const leads = useMemo(() => {
+    // v1: descartado, descarte ou venda esperando aprovação não aparecem no Kanban
+    const noFunil = allLeads.filter(l => !foraDoKanban(l));
     let base = isManager
-      ? (kbCorretor !== 'Todos os corretores' ? allLeads.filter(l => l.corretor === kbCorretor) : allLeads)
-      : allLeads.filter(l => l.corretor === meNome);
+      ? (kbCorretor !== 'Todos os corretores' ? noFunil.filter(l => l.corretor === kbCorretor) : noFunil)
+      : noFunil.filter(l => l.corretor === meNome);
     if (filterCanal) base = base.filter(l => l.canal === filterCanal);
     if (kbTag) base = base.filter(l => l.tags.includes(kbTag));
     const q = query.trim().toLowerCase();
@@ -304,6 +308,7 @@ export default function Kanban() {
           <div className="kb-cols" style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 14, alignItems: 'flex-start' }}>
             {colunas.map((c, ci) => {
               const colLeadsTotal = leads.filter(l => l.colunaId === c.id);
+              if (!colLeadsTotal.length && !dragId && !query && highlightCol !== c.id) return null;
               const visivel = visivelPorColuna[c.id] || LOTE_COLUNA;
               const colLeads = colLeadsTotal.slice(0, visivel);
               const isMobileActive = mobileCol === c.id;
@@ -369,6 +374,11 @@ export default function Kanban() {
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                           <LeadAvatar foto={l.foto} seedIndex={i} size={34} />
                           <span style={{ flex: 1, minWidth: 0 }}>
+                            {l.temperatura && (
+                              <span style={{ float: 'right', marginLeft: 4 }} title={'Temperatura: ' + l.temperatura}>
+                                {l.temperatura === 'quente' ? <Flame size={13} color="#DC2626" /> : l.temperatura === 'morno' ? <Sun size={13} color="#D97706" /> : <Snowflake size={13} color="#2563EB" />}
+                              </span>
+                            )}
                             <span style={{ display: 'block', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, minWidth: 0 }}>
                               <FileText size={11} strokeWidth={2} style={{ flex: 'none' }} />
@@ -380,6 +390,14 @@ export default function Kanban() {
                                 Entrou {dataHoraCurta(l.criadoEm)}
                               </span>
                             )}
+                            {l.proximoContatoEm && (() => {
+                              const atrasado = +new Date(l.proximoContatoEm) < Date.now();
+                              return (
+                                <span title="Próximo contato" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, marginTop: 2, whiteSpace: 'nowrap', color: atrasado ? 'var(--terra)' : 'var(--muted)', fontWeight: atrasado ? 700 : 400 }}>
+                                  {atrasado ? 'Atrasado · ' : 'Próx. contato · '}{dataHoraCurta(l.proximoContatoEm)}
+                                </span>
+                              );
+                            })()}
                             {l.segundo && (
                               <span title="Essa pessoa preencheu um formulário de novo — veja o Histórico do lead" style={{ display: 'inline-block', marginTop: 4, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 20, background: 'var(--terraSoft)', color: 'var(--terra)' }}>
                                 Cadastrou de novo

@@ -22,7 +22,7 @@ export function Sidebar() {
   const location = useLocation();
 
   const modoWhatsapp = useAppStore(s => s.modoWhatsapp);
-  const menuItems = NAV_ITEMS.filter(it => it.group === 'menu');
+  const menuItems = NAV_ITEMS.filter(it => it.group === 'menu' && (!it.mgrOnly || isManager));
   const toolItems = NAV_ITEMS.filter(it => {
     if (it.group !== 'ferramentas') return false;
     if (it.mgrOnly && !isManager) return false;
@@ -31,7 +31,8 @@ export function Sidebar() {
     return true;
   });
 
-  const badgeFor = (path: string) => (path === '/conversas' ? unread : path === '/rebatidas' ? rebatidas : 0);
+  const aprovacoesPendentes = useAppStore(s => s.aprovacoes.length);
+  const badgeFor = (path: string) => (path === '/conversas' ? unread : path === '/rebatidas' ? rebatidas : path === '/aprovacoes' ? aprovacoesPendentes : 0);
 
   const minhaFila = me ? fila.find(f => f.corretorId === me.id) : undefined;
   const noPlantao = minhaFila ? minhaFila.ativo : !!me?.emPlantao;

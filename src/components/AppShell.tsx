@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { MobileNav } from './MobileNav';
 import { LeadModal } from './LeadModal';
+import { ModaisRegrasOka } from './ModaisRegrasOka';
 import { ConfirmDialog } from './ConfirmDialog';
 import { AlertModal } from './AlertModal';
 import { QrModal } from './QrModal';
@@ -40,6 +41,9 @@ export function AppShell() {
       if (s.qrFor) { s.closeQr(); return; }
       if (s.importOpen) { s.setImportOpen(false); return; }
       if (s.confirm) { s.closeConfirm(); return; }
+      if (s.moverPendente) { s.setMoverPendente(null); return; }
+      if (s.vendaLeadId) { s.setVendaLeadId(null); return; }
+      if (s.descarteLeadId) { s.setDescarteLeadId(null); return; }
       if (s.discardOpen) { s.closeDiscard(); return; }
       if (s.leadId) { s.closeLead(); return; }
       if (s.menuOpen) { s.toggleMenu(); return; }
@@ -66,6 +70,7 @@ export function AppShell() {
 
       <MobileNav />
       <LeadModal />
+      <ModaisRegrasOka />
       <ConfirmDialog />
       <AlertModal />
       <QrModal />

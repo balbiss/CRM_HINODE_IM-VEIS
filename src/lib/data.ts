@@ -97,7 +97,46 @@ export interface Lead {
   iaResumo?: string;
   /** Número central (sessão WhatsApp) por onde o lead fala com a imobiliária. */
   sessaoWhatsappId?: string | null;
+  // --- campos do card da v1 (CRM OKA) ---
+  corretorId?: string | null;
+  temperatura?: 'quente' | 'morno' | 'frio' | null;
+  favorito?: boolean;
+  telefoneAlternativo?: string | null;
+  bairroInteresse?: string | null;
+  tipoImovelInteresse?: string | null;
+  referencia?: string | null;
+  linkDrive?: string | null;
+  saldoFgts?: number | null;
+  valorEntrada?: number | null;
+  dataNascimento?: string | null;
+  cadenciaChamada?: number;
+  dataUltimaChamada?: string | null;
+  proximoContatoEm?: string | null;
+  dataVisita?: string | null;
+  tipoVisita?: string | null;
+  statusVisita?: string | null;
+  descartadoEm?: string | null;
+  descartePendente?: boolean;
+  vendaPendente?: boolean;
+  dataFechamento?: string | null;
+  valorVenda?: number | null;
+  dataVendaInformada?: string | null;
+  empreendimento?: string | null;
+  torre?: string | null;
+  unidade?: string | null;
+  creditoAprovadoEm?: string | null;
 }
+
+/** Motivos de descarte da v1. Os extremos só valem depois da aprovação do dono/gerente. */
+export const MOTIVOS_DESCARTE_NORMAL = ['Sem Resposta', 'Parou de Responder', 'Sem Interesse', 'Aprovado/Desistiu', 'Sem Interesse (Renda Baixa)'];
+export const MOTIVOS_DESCARTE_EXTREMO = [
+  'Descadastrar', 'Descadastrar (Idoso)', 'Descadastrar (Outra Região)', 'Descadastrar (Número Errado)',
+  'Já Comprou (Outra Empresa)', 'Contato Errado',
+];
+export const MOTIVOS_DESCARTE_OBS_OBRIGATORIA = ['Descadastrar', 'Já Comprou (Outra Empresa)', 'Contato Errado'];
+export const STATUS_VISITA: [string, string][] = [
+  ['AGENDADA', 'Agendada'], ['REALIZADA', 'Realizada'], ['DESMARCADA', 'Desmarcou'], ['REAGENDADA', 'Reagendou'], ['FURO', 'Furou (não compareceu)'],
+];
 
 export function buildLeads(): Lead[] {
   const dist: ColId[] = [

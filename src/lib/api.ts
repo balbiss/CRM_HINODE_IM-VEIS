@@ -1,6 +1,7 @@
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3001';
 
-export interface ApiError extends Error { status: number }
+/** `motivo`: código que o servidor manda quando uma regra barrou a ação (ex.: "proximo_contato"). */
+export interface ApiError extends Error { status: number; motivo?: string }
 
 export async function apiFetch<T = unknown>(path: string, token: string | null, options: RequestInit = {}): Promise<T> {
   const res = await fetch(API_URL + path, {
@@ -12,9 +13,10 @@ export async function apiFetch<T = unknown>(path: string, token: string | null, 
     },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}) as { error?: string });
+    const body = await res.json().catch(() => ({}) as { error?: string; motivo?: string });
     const err = new Error(body.error || 'Erro ' + res.status) as ApiError;
     err.status = res.status;
+    err.motivo = body.motivo;
     throw err;
   }
   if (res.status === 204) return undefined as T;

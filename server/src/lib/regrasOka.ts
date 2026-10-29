@@ -15,10 +15,7 @@ export const MOTIVOS_DESCARTE_EXTREMO = [
 /** Desses, só estes exigem observação escrita (o motivo dos outros já explica). */
 export const MOTIVOS_DESCARTE_OBS_OBRIGATORIA = ['Descadastrar', 'Já Comprou (Outra Empresa)', 'Contato Errado'];
 /** Descarte normal: vai pro bolsão na hora, qualquer corretor pode puxar de novo. */
-export const MOTIVOS_DESCARTE_NORMAL = [
-  'Sem Resposta', 'Não Tem Interesse', 'Sem Interesse (Renda Baixa)', 'Fora do Perfil',
-  'Já Comprou com a Gente', 'Outro',
-];
+export const MOTIVOS_DESCARTE_NORMAL = ['Sem Resposta', 'Parou de Responder', 'Sem Interesse', 'Aprovado/Desistiu', 'Sem Interesse (Renda Baixa)'];
 
 /** Mover pra essas colunas exige um próximo contato marcado no futuro (pede a data junto). */
 export const SLUGS_EXIGEM_PROXIMO_CONTATO = ['conversando', 'visitou', 'cobrar_doc', 'pendente', 'aprovado', 'reprovado', 'restricao', 'futuros'];

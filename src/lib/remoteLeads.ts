@@ -26,7 +26,35 @@ export interface RemoteLead {
   iaStatus?: string | null;
   iaResumo?: string | null;
   sessaoWhatsappId?: string | null;
+  temperatura?: 'quente' | 'morno' | 'frio' | null;
+  favorito?: boolean;
+  telefoneAlternativo?: string | null;
+  bairroInteresse?: string | null;
+  tipoImovelInteresse?: string | null;
+  referencia?: string | null;
+  linkDrive?: string | null;
+  saldoFgts?: string | null;
+  valorEntrada?: string | null;
+  dataNascimento?: string | null;
+  cadenciaChamada?: number;
+  dataUltimaChamada?: string | null;
+  proximoContatoEm?: string | null;
+  dataVisita?: string | null;
+  tipoVisita?: string | null;
+  statusVisita?: string | null;
+  descartadoEm?: string | null;
+  descartePendenteAprovacao?: boolean;
+  vendaPendenteAprovacao?: boolean;
+  dataFechamento?: string | null;
+  valorVenda?: string | null;
+  dataVendaInformada?: string | null;
+  empreendimento?: string | null;
+  torre?: string | null;
+  unidade?: string | null;
+  creditoAprovadoEm?: string | null;
 }
+
+const num = (v: string | null | undefined) => (v == null || v === '' ? null : Number(v));
 
 const CANAL_LABEL: Record<string, string> = { Indicacao: 'Indicação' };
 
@@ -70,5 +98,38 @@ export function mapRemoteLead(r: RemoteLead, colunas: RemoteColuna[], perfis: Re
     iaStatus: r.iaStatus ?? '',
     iaResumo: r.iaResumo ?? '',
     sessaoWhatsappId: r.sessaoWhatsappId ?? null,
+    corretorId: r.corretorId,
+    temperatura: r.temperatura ?? null,
+    favorito: !!r.favorito,
+    telefoneAlternativo: r.telefoneAlternativo ?? null,
+    bairroInteresse: r.bairroInteresse ?? null,
+    tipoImovelInteresse: r.tipoImovelInteresse ?? null,
+    referencia: r.referencia ?? null,
+    linkDrive: r.linkDrive ?? null,
+    saldoFgts: num(r.saldoFgts),
+    valorEntrada: num(r.valorEntrada),
+    dataNascimento: r.dataNascimento ?? null,
+    cadenciaChamada: r.cadenciaChamada ?? 0,
+    dataUltimaChamada: r.dataUltimaChamada ?? null,
+    proximoContatoEm: r.proximoContatoEm ?? null,
+    dataVisita: r.dataVisita ?? null,
+    tipoVisita: r.tipoVisita ?? null,
+    statusVisita: r.statusVisita ?? null,
+    descartadoEm: r.descartadoEm ?? null,
+    descartePendente: !!r.descartePendenteAprovacao,
+    vendaPendente: !!r.vendaPendenteAprovacao,
+    dataFechamento: r.dataFechamento ?? null,
+    valorVenda: num(r.valorVenda),
+    dataVendaInformada: r.dataVendaInformada ?? null,
+    empreendimento: r.empreendimento ?? null,
+    torre: r.torre ?? null,
+    unidade: r.unidade ?? null,
+    creditoAprovadoEm: r.creditoAprovadoEm ?? null,
   };
+}
+
+/** v1: card descartado, com descarte esperando aprovação ou com venda esperando aprovação não
+ *  aparece no Kanban nem na Agenda (some da tela do corretor até a gestão decidir). */
+export function foraDoKanban(l: { descartadoEm?: string | null; descartePendente?: boolean; vendaPendente?: boolean }) {
+  return !!l.descartadoEm || !!l.descartePendente || !!l.vendaPendente;
 }

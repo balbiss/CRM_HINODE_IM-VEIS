@@ -3,7 +3,7 @@ import { Paperclip } from 'lucide-react';
 import { dataHoraCompleta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { CADENCIAS, MOTIVOS_DESCARTE, APROVACAO, mapMsgs } from '../lib/data';
+import { mapMsgs } from '../lib/data';
 import { BRL, canalPill, thumb } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
@@ -13,6 +13,7 @@ import { ChatAvatar } from './ChatAvatar';
 import { AudioRecordButton } from './AudioRecordButton';
 import { EmojiPicker } from './EmojiPicker';
 import { AvisoJanelaOficial } from './WhatsappOficial';
+import { LeadDetalhesOka } from './LeadDetalhesOka';
 
 const TABS: Array<[string, string]> = [
   ['detalhes', 'Detalhes'], ['chat', 'Chat WhatsApp'], ['followup', 'Follow-up'], ['historico', 'Histórico'],
@@ -34,22 +35,13 @@ export function LeadModal() {
   const toast = useAppStore(s => s.toast);
   const [enviandoAnexo, setEnviandoAnexo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const setCadenciaLead = useAppStore(s => s.setCadenciaLead);
   const imoveis = useAppStore(s => s.imoveis);
-  const move = useAppStore(s => s.move);
   const colunas = useAppStore(s => s.colunasRemotas);
-  const advance = useAppStore(s => s.advance);
   const ask = useAppStore(s => s.ask);
   const excluirLead = useAppStore(s => s.excluirLead);
   const limparConversa = useAppStore(s => s.limparConversa);
   const [excluirOpen, setExcluirOpen] = useState(false);
   const { isManager } = useRoleInfo();
-  const discardOpen = useAppStore(s => s.discardOpen);
-  const discardWarn = useAppStore(s => s.discardWarn);
-  const openDiscard = useAppStore(s => s.openDiscard);
-  const closeDiscard = useAppStore(s => s.closeDiscard);
-  const pickMotivoDescarte = useAppStore(s => s.pickMotivoDescarte);
-  const requestApproval = useAppStore(s => s.requestApproval);
   const fluxos = useAppStore(s => s.fluxos);
   const execucoesFollowup = useAppStore(s => s.execucoesFollowup);
   const iniciarFollowupLead = useAppStore(s => s.iniciarFollowupLead);
@@ -78,15 +70,8 @@ export function LeadModal() {
   if (!L) return null;
 
   const colAtual = colunas.find(c => c.id === L.colunaId)?.titulo ?? '—';
-  const cad = L.cadencia || '';
   const execucao = execucoesFollowup.find(e => e.leadId === leadId) ?? null;
   const fluxosDisponiveis = fluxos.filter(f => f.passos.length > 0);
-
-  const fields = [
-    { label: 'Nome completo', value: L.nome }, { label: 'Telefone', value: L.tel },
-    { label: 'E-mail', value: L.email }, { label: 'Corretor responsável', value: L.corretor },
-    { label: 'Campanha', value: L.campanha }, { label: 'Renda declarada', value: BRL(L.renda) },
-  ];
 
   const eventos = (leadId && eventosLead[leadId]) || [];
   const tarefasDoLead = tarefas.filter(t => t.leadId === leadId).sort((a, b) => +new Date(a.venceEm) - +new Date(b.venceEm));
@@ -149,14 +134,7 @@ export function LeadModal() {
         <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           {leadTab === 'detalhes' && (
             <>
-              <div data-modal-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 22 }}>
-                {fields.map(f => (
-                  <div key={f.label}>
-                    <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 7 }}>{f.label}</label>
-                    <input defaultValue={f.value} style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
-                  </div>
-                ))}
-              </div>
+              <LeadDetalhesOka lead={L} />
               {L.iaResumo && (
                 <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid #0F5E57', borderRadius: 10, background: 'var(--card)' }}>
                   <p style={{ margin: '0 0 6px', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: '#0F5E57', fontWeight: 700 }}>Qualificação feita pelo Agente de IA</p>
@@ -187,26 +165,7 @@ export function LeadModal() {
                   </div>
                 );
               })()}
-              <div data-modal-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 7 }}>Cadência de chamada</label>
-                  <select value={cad} onChange={e => setCadenciaLead(L.id, e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }}>
-                    <option value="">—</option>
-                    {CADENCIAS.map(c => <option key={c}>{c}</option>)}
-                    {cad && !CADENCIAS.includes(cad) && <option value={cad}>{cad}</option>}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 7 }}>Coluna do Kanban</label>
-                  <select value={L.colunaId} onChange={e => move(L.id, e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }}>
-                    {colunas.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                <button onClick={closeLead} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Salvar alterações</button>
-                <button onClick={() => advance(L.id)} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600 }}>Avançar etapa</button>
-                <span style={{ flex: 1 }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
                 {isManager && (
                 <div style={{ position: 'relative' }}>
                   <button onClick={() => setExcluirOpen(v => !v)} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, color: '#C0392B' }}>Excluir ▾</button>
@@ -228,32 +187,6 @@ export function LeadModal() {
                   )}
                 </div>
                 )}
-                <div style={{ position: 'relative' }}>
-                  <button onClick={openDiscard} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, color: 'var(--terra)' }}>Descartar lead ▾</button>
-                  {discardOpen && (
-                    <div style={{ position: 'absolute', right: 0, bottom: 52, width: 262, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 6, boxShadow: '0 14px 30px rgba(28,27,26,.16)', zIndex: 5 }}>
-                      <p style={{ fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '6px 10px 8px' }}>Motivo do descarte</p>
-                      {MOTIVOS_DESCARTE.map(m => (
-                        <button
-                          key={m}
-                          onClick={() => pickMotivoDescarte(m)}
-                          style={{ width: '100%', textAlign: 'left', padding: '9px 11px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13, color: APROVACAO.includes(m) ? 'var(--terra)' : 'var(--ink)' }}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                      {discardWarn && (
-                        <div style={{ borderTop: '1px solid var(--line)', marginTop: 6, padding: '12px 10px 8px' }}>
-                          <p style={{ fontSize: 12.5, lineHeight: 1.55, margin: '0 0 10px', color: 'var(--terra)', fontWeight: 600 }}>"{discardWarn}" requer aprovação do gerente.</p>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button onClick={requestApproval} style={{ flex: 1, padding: 8, border: 'none', borderRadius: 7, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600 }}>Solicitar aprovação</button>
-                            <button onClick={closeDiscard} style={{ padding: '8px 11px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5 }}>Cancelar</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
             </>
           )}

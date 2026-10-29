@@ -66,7 +66,14 @@ export interface LinkUtilInput { categoria: string; titulo: string; url: string 
 export interface RemoteTreinamento { id: string; titulo: string; descricao: string | null; duracaoTexto: string | null; categoria: string | null; videoUrl: string | null }
 export interface TreinamentoInput { titulo: string; descricao?: string | null; duracaoTexto?: string | null; categoria?: string | null; videoUrl?: string | null }
 
-export interface RemoteNotificacao { id: string; tipo: string; titulo: string; texto: string | null; lida: boolean; criadoEm: string }
+export interface RemoteNotificacao { id: string; tipo: string; titulo: string; texto: string | null; lida: boolean; criadoEm: string; leadId?: string | null }
+/** Pedido esperando o dono/gerente: descarte extremo ou venda registrada. */
+export interface Aprovacao {
+  id: string; nome: string; telefone: string; campanha: string | null; corretorNome: string | null;
+  motivoDescarte: string | null; observacao: string | null; descartePendente: boolean; vendaPendente: boolean;
+  valorVenda: string | null; empreendimento: string | null; unidade: string | null; torre: string | null;
+  dataVendaInformada: string | null; ultimaAcaoEm: string | null;
+}
 
 export interface RemoteTarefa {
   id: string; titulo: string; descricao: string | null; venceEm: string;
@@ -192,6 +199,13 @@ interface AppState {
 
   discardOpen: boolean;
   discardWarn: string | null;
+
+  // --- regras da v1 (CRM OKA) no card ---
+  /** Mudança de coluna barrada pelo servidor, esperando a data (próximo contato ou compromisso). */
+  moverPendente: { leadId: string; colunaId: string; motivo: 'proximo_contato' | 'agendamento'; titulo: string } | null;
+  vendaLeadId: string | null;
+  descarteLeadId: string | null;
+  aprovacoes: Aprovacao[];
 
   conn: Record<string, boolean>;
   qrFor: string | null;
@@ -320,6 +334,20 @@ interface AppState {
   closeDiscard: () => void;
   pickMotivoDescarte: (motivo: string) => void;
   requestApproval: () => void;
+
+  setMoverPendente: (v: AppState['moverPendente']) => void;
+  setVendaLeadId: (id: string | null) => void;
+  setDescarteLeadId: (id: string | null) => void;
+  /** Mover com a data que a regra pediu (próximo contato / compromisso). */
+  moverComData: (leadId: string, colunaId: string, extra: { proximoContatoEm?: string; dataVisita?: string; tipoVisita?: 'VISITA' | 'FID' }) => Promise<boolean>;
+  patchLead: (leadId: string, patch: Record<string, unknown>) => Promise<boolean>;
+  registrarCadencia: (leadId: string, cadencia: number) => Promise<void>;
+  descartarLead: (leadId: string, motivo: string, observacao: string) => Promise<boolean>;
+  registrarVenda: (leadId: string, dados: { valor: number; dataVenda: string; empreendimento?: string; unidade?: string; torre?: string; observacao?: string }) => Promise<boolean>;
+  removerCompromisso: (leadId: string) => Promise<void>;
+  transferirLeads: (leadIds: string[], corretorId: string) => Promise<boolean>;
+  fetchAprovacoes: () => Promise<void>;
+  decidirAprovacao: (leadId: string, tipo: 'descarte' | 'venda', decisao: 'aprovar' | 'rejeitar') => Promise<void>;
 
   setQrFor: (nome: string) => void;
   closeQr: () => void;
@@ -496,6 +524,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   convId: null, convDraft: '', convQuery: '', convCorretor: 'Todos os corretores', convTyping: false,
 
   discardOpen: false, discardWarn: null,
+  moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [],
 
   conn: { 'Camila Rocha': true, 'Diego Antunes': true, 'Fernanda Lopes': false, 'Marcelo Braga': false, 'Priscila Nunes': true, 'Rafael Teixeira': false },
   qrFor: null, importOpen: false, newLeadOpen: false, templates: [], imoveis: [], linksUteis: [], treinamentos: [],
@@ -596,6 +625,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       // s.leads, senão o nome/telefone/valor dele fica exposto no estado local de outro
       // corretor mesmo que a tela filtre a exibição.
       const naoEhMeu = me?.role === 'corretor' && raw.corretorId !== null && raw.corretorId !== me.id;
+      // dono/gerente: pedido de aprovação novo (ou decidido em outra aba) atualiza a fila de Aprovações
+      if (me && me.role !== 'corretor' && (raw.descartePendenteAprovacao || raw.vendaPendenteAprovacao || get().aprovacoes.some(a => a.id === raw.id))) {
+        void get().fetchAprovacoes();
+      }
 
       set(s => {
         if (naoEhMeu) {
@@ -723,6 +756,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const leadsCorretorIds = Object.fromEntries(leadsRaw.map(r => [r.id, r.corretorId]));
       const fila = filaRaw.map(f => ({ corretorId: f.corretorId, nome: f.nome, ativo: f.emPlantao }));
       set({ colunasRemotas: colunas, perfisRemotos: perfis, leads, leadsCorretorIds, fila, tags: tagsRaw, kanbanLoading: false });
+      if (get().me?.role !== 'corretor') void get().fetchAprovacoes();
     } catch (e) {
       get().toast('Não foi possível carregar os leads do servidor');
       set({ kanbanLoading: false });
@@ -812,10 +846,114 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().toast(l.nome + ' → ' + destino.titulo);
     if (!token) return;
     apiFetch('/api/leads/' + id + '/mover', token, { method: 'PATCH', body: JSON.stringify({ colunaId }) })
-      .catch(() => {
+      .catch((e: ApiError) => {
         set(s => ({ leads: s.leads.map(x => (x.id === id ? { ...x, ...antes } : x)) }));
-        get().toast('Não deu pra salvar — ' + l.nome + ' voltou pra coluna anterior');
+        // regras da v1: a coluna pede uma data, ou VENDA só pelo registro de venda
+        if (e.motivo === 'proximo_contato' || e.motivo === 'agendamento') {
+          set({ moverPendente: { leadId: id, colunaId, motivo: e.motivo, titulo: destino.titulo } });
+          return;
+        }
+        if (e.motivo === 'registrar_venda') { set({ vendaLeadId: id }); get().toast(e.message); return; }
+        get().toast(e.status === 409 ? e.message : 'Não deu pra salvar — ' + l.nome + ' voltou pra coluna anterior');
       });
+  },
+  setMoverPendente: v => set({ moverPendente: v }),
+  setVendaLeadId: id => set({ vendaLeadId: id }),
+  setDescarteLeadId: id => set({ descarteLeadId: id }),
+  moverComData: async (leadId, colunaId, extra) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      await apiFetch('/api/leads/' + leadId + '/mover', token, { method: 'PATCH', body: JSON.stringify({ colunaId, ...extra }) });
+      set({ moverPendente: null });
+      const destino = get().colunasRemotas.find(c => c.id === colunaId);
+      get().toast('Movido para ' + (destino?.titulo ?? 'a nova coluna'));
+      return true;
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível mover');
+      return false;
+    }
+  },
+  patchLead: async (leadId, patch) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      await apiFetch('/api/leads/' + leadId, token, { method: 'PATCH', body: JSON.stringify(patch) });
+      return true; // o socket (lead:updated) atualiza a tela
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível salvar');
+      return false;
+    }
+  },
+  registrarCadencia: async (leadId, cadencia) => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      const row = await apiFetch<RemoteLead>('/api/leads/' + leadId + '/cadencia', token, { method: 'POST', body: JSON.stringify({ cadencia }) });
+      get().toast('Cadência atualizada — próximo contato ' + new Date(row.proximoContatoEm!).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível atualizar a cadência'); }
+  },
+  descartarLead: async (leadId, motivo, observacao) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      const row = await apiFetch<RemoteLead>('/api/leads/' + leadId + '/descartar', token, { method: 'POST', body: JSON.stringify({ motivo, observacao: observacao || undefined }) });
+      set({ descarteLeadId: null, leadId: null });
+      get().toast(row.descartePendenteAprovacao ? 'Pedido de descarte enviado pra aprovação do gerente/dono' : 'Lead devolvido ao bolsão — ' + motivo);
+      return true;
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível descartar');
+      return false;
+    }
+  },
+  registrarVenda: async (leadId, dados) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      await apiFetch('/api/leads/' + leadId + '/venda', token, { method: 'POST', body: JSON.stringify(dados) });
+      set({ vendaLeadId: null });
+      get().toast('Venda enviada pra aprovação do gerente/dono');
+      return true;
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível registrar a venda');
+      return false;
+    }
+  },
+  removerCompromisso: async leadId => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      await apiFetch('/api/leads/' + leadId + '/remover-compromisso', token, { method: 'POST' });
+      get().toast('Compromisso removido do card');
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível remover'); }
+  },
+  transferirLeads: async (leadIds, corretorId) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      const r = await apiFetch<{ total: number }>('/api/leads/transferir', token, { method: 'POST', body: JSON.stringify({ leadIds, corretorId }) });
+      const nome = get().perfisRemotos.find(p => p.id === corretorId)?.nome ?? 'corretor';
+      get().toast(r.total === 1 ? 'Lead transferido para ' + nome : r.total + ' leads transferidos para ' + nome);
+      return true;
+    } catch (e) {
+      get().toast((e as ApiError).message || 'Não foi possível transferir');
+      return false;
+    }
+  },
+  fetchAprovacoes: async () => {
+    const token = get().token;
+    if (!token) return;
+    try { set({ aprovacoes: await apiFetch<Aprovacao[]>('/api/aprovacoes', token) }); } catch { /* sem permissão / offline */ }
+  },
+  decidirAprovacao: async (leadId, tipo, decisao) => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      await apiFetch('/api/aprovacoes/' + leadId + '/' + tipo + '/' + decisao, token, { method: 'POST' });
+      set(s => ({ aprovacoes: s.aprovacoes.filter(a => !(a.id === leadId && (tipo === 'venda' ? a.vendaPendente : a.descartePendente))) }));
+      get().toast(tipo === 'venda' ? (decisao === 'aprovar' ? 'Venda aprovada' : 'Venda rejeitada — voltou pro corretor')
+        : (decisao === 'aprovar' ? 'Descarte aprovado — lead foi pra LEAD DESCADASTRAR' : 'Descarte rejeitado — voltou pro corretor'));
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível concluir'); }
   },
   moverPorSlug: (id, slug) => {
     const cid = slugToColunaId(slug, get().colunasRemotas);

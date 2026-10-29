@@ -10,6 +10,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/roleta', label: 'Roleta', short: 'Roleta', group: 'menu' },
   { path: '/rebatidas', label: 'Rebatidas', short: 'Bolsão', group: 'menu' },
   { path: '/credito', label: 'Análise de Crédito', short: 'Crédito', group: 'menu' },
+  { path: '/aprovacoes', label: 'Aprovações', short: 'Aprovar', mgrOnly: true, group: 'menu' },
 
   { path: '/equipe', label: 'Equipe', short: 'Equipe', mgrOnly: true, group: 'ferramentas' },
   { path: '/importacoes', label: 'Importar planilha', short: 'Importar', mgrOnly: true, group: 'ferramentas' },
