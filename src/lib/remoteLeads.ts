@@ -52,6 +52,9 @@ export interface RemoteLead {
   torre?: string | null;
   unidade?: string | null;
   creditoAprovadoEm?: string | null;
+  jaTeveCorretor?: boolean;
+  tentativasContato?: number;
+  dataAtribuicao?: string | null;
 }
 
 const num = (v: string | null | undefined) => (v == null || v === '' ? null : Number(v));
@@ -125,6 +128,9 @@ export function mapRemoteLead(r: RemoteLead, colunas: RemoteColuna[], perfis: Re
     torre: r.torre ?? null,
     unidade: r.unidade ?? null,
     creditoAprovadoEm: r.creditoAprovadoEm ?? null,
+    jaTeveCorretor: !!r.jaTeveCorretor,
+    tentativasContato: r.tentativasContato ?? 0,
+    dataAtribuicao: r.dataAtribuicao ?? null,
   };
 }
 

@@ -15,6 +15,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/equipe', label: 'Equipe', short: 'Equipe', mgrOnly: true, group: 'ferramentas' },
   { path: '/importacoes', label: 'Importar planilha', short: 'Importar', mgrOnly: true, group: 'ferramentas' },
   { path: '/relatorios', label: 'Relatórios', short: 'Relatos', group: 'ferramentas' },
+  { path: '/campanhas', label: 'Campanhas', short: 'Campanhas', group: 'ferramentas' },
   { path: '/templates', label: 'Templates', short: 'Modelos', group: 'ferramentas' },
   { path: '/followup', label: 'Follow-ups', short: 'Fluxo', group: 'ferramentas' },
   { path: '/integracoes', label: 'Integrações', short: 'Conexão', group: 'ferramentas' },

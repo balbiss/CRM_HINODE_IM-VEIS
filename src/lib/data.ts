@@ -125,6 +125,9 @@ export interface Lead {
   torre?: string | null;
   unidade?: string | null;
   creditoAprovadoEm?: string | null;
+  jaTeveCorretor?: boolean;
+  tentativasContato?: number;
+  dataAtribuicao?: string | null;
 }
 
 /** Motivos de descarte da v1. Os extremos só valem depois da aprovação do dono/gerente. */

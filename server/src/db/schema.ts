@@ -871,7 +871,11 @@ export const distribuicaoLog = pgTable('distribuicao_log', {
   origem: text('origem').notNull(),
   roletaId: uuid('roleta_id'),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  // 124 mil linhas vindas da v1: "já teve corretor" / "+ Mais Rebatidas" consultam por lead e corretor
+  leadIdx: index('distribuicao_log_lead_id_idx').on(table.leadId, table.corretorId),
+  corretorIdx: index('distribuicao_log_corretor_id_idx').on(table.corretorId, table.criadoEm),
+}));
 
 // --- relations (for query-builder convenience) ---
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { notificar } from '../lib/notificar.js';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, colunasKanban, imobiliarias, imoveis, notificacoes } from '../db/schema.js';
@@ -131,14 +132,16 @@ async function recadastrarLead(io: SocketServer, imobId: string, lead: LeadRow, 
     .where(and(eq(colunasKanban.imobiliariaId, imobId), eq(colunasKanban.slug, 'novo'))).limit(1);
   const [colRebatida] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
     .where(and(eq(colunasKanban.imobiliariaId, imobId), eq(colunasKanban.slug, 'rebatida'))).limit(1);
-  const reabrir = !lead.corretorId && (!!lead.motivoDescarte || (!!colRebatida && lead.colunaId === colRebatida.id));
+  // descadastrado (aprovado) ou com descarte esperando aprovação não volta sozinho (v1)
+  const bloqueado = lead.descartePendenteAprovacao || /^Descadastrar|^Já Comprou|^Contato Errado/.test(lead.motivoDescarte ?? '');
+  const reabrir = !lead.corretorId && !bloqueado && (!!lead.motivoDescarte || !!lead.descartadoEm || (!!colRebatida && lead.colunaId === colRebatida.id));
 
-  const patch: Partial<LeadRow> = { segundoCadastro: true };
+  const patch: Partial<LeadRow> = { segundoCadastro: true, recadastroEm: new Date(), recadastroOrigem: dados.campanha ?? dados.canal };
   if (!lead.email && dados.email) patch.email = dados.email.trim();
   if (dados.fbLeadId && !lead.fbLeadId) patch.fbLeadId = dados.fbLeadId;
   if (!lead.campanha && dados.campanha) patch.campanha = dados.campanha.trim();
   if (lead.importacaoPendente) patch.importacaoPendente = false;
-  if (reabrir) Object.assign(patch, { colunaId: colNova?.id ?? lead.colunaId, motivoDescarte: null, entrouNaColunaEm: new Date() });
+  if (reabrir) Object.assign(patch, { colunaId: colNova?.id ?? lead.colunaId, motivoDescarte: null, descartadoEm: null, descartadoPor: null, entrouNaColunaEm: new Date() });
   const [row] = await db.update(leads).set(patch).where(eq(leads.id, lead.id)).returning();
 
   const origem = dados.canal + (dados.campanha ? ' · ' + dados.campanha : '');
@@ -153,10 +156,8 @@ async function recadastrarLead(io: SocketServer, imobId: string, lead: LeadRow, 
   io.to('imobiliaria:' + imobId).emit('lead:updated', tagIds ? { ...row, tagIds } : row);
 
   if (row.corretorId) {
-    const texto = `${row.nome} preencheu o formulário de novo (${origem}). Bom momento pra chamar.`;
-    await db.insert(notificacoes).values({ perfilId: row.corretorId, tipo: 'lead', titulo: 'Seu lead se cadastrou de novo', texto, lida: false });
-    enviarPush(row.corretorId, { title: 'Seu lead se cadastrou de novo', body: texto, url: '/kanban', tag: 'lead-' + row.id }).catch(() => {});
-  } else if (row.iaStatus !== 'atendendo') {
+    await notificar({ perfilId: row.corretorId, leadId: row.id, tipo: 'lead_novo_atribuido', titulo: 'Seu lead se cadastrou de novo numa campanha: ' + row.nome, texto: origem });
+  } else if (reabrir && row.iaStatus !== 'atendendo') {
     primeiroAtendimento(io, imobId, row.id, dados.canal);
   }
   return row;

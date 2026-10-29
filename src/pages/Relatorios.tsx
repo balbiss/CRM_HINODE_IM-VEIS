@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PainelOka } from '../components/PainelOka';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { BRL } from '../lib/format';
@@ -278,6 +279,7 @@ export default function Relatorios() {
         </div>
       )}
       <div style={{ marginTop: 16 }}><RelatorioCorretor /></div>
+      <PainelOka de={de} ate={ate} />
     </div>
   );
 }

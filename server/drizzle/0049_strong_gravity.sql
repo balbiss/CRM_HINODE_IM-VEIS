@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS "distribuicao_log_lead_id_idx" ON "distribuicao_log" USING btree ("lead_id","corretor_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "distribuicao_log_corretor_id_idx" ON "distribuicao_log" USING btree ("corretor_id","criado_em");

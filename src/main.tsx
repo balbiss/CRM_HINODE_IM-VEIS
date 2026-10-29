@@ -22,6 +22,7 @@ import Bolsao from './pages/Bolsao';
 import Followup from './pages/Followup';
 import Credito from './pages/Credito';
 import Aprovacoes from './pages/Aprovacoes';
+import Campanhas from './pages/Campanhas';
 import Agenda from './pages/Agenda';
 import Equipe from './pages/Equipe';
 import Relatorios from './pages/Relatorios';
@@ -64,6 +65,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="imoveis" element={<Imoveis />} />
           <Route path="credito" element={<Credito />} />
           <Route path="aprovacoes" element={<Aprovacoes />} />
+          <Route path="campanhas" element={<Campanhas />} />
           <Route path="agenda" element={<Agenda />} />
           <Route path="roleta" element={<Roleta />} />
           <Route path="rebatidas" element={<Bolsao />} />

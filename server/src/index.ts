@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
+import 'express-async-errors';
+// Express 4 não pega erro de rota async: sem isto, um erro em qualquer tela derrubava o servidor inteiro.
+process.on('unhandledRejection', err => console.error('Erro não tratado (servidor continua no ar):', (err as Error)?.message ?? err));
 import cors from 'cors';
 import http from 'node:http';
 import { Server } from 'socket.io';
@@ -9,7 +12,10 @@ import { aprovacoesRouter } from './routes/aprovacoes.js';
 import { setIoNotificacoes } from './lib/notificar.js';
 import compression from 'compression';
 import { lembretesCreditoDaHora } from './lib/credito.js';
-import { desligarFimDeExpediente, reatribuirSlaVencido } from './lib/roletaOka.js';
+import { avisarCompromissosEquipe, avisarAniversarios, avisarPosVenda } from './lib/agendaOka.js';
+import { compromissosRouter } from './routes/compromissos.js';
+import { relatoriosOkaRouter } from './routes/relatoriosOka.js';
+import { desligarFimDeExpediente, reatribuirSlaVencido, distribuirRecadastrosPendentes } from './lib/roletaOka.js';
 import { colunasRouter } from './routes/colunas.js';
 import { filasRouter } from './routes/filas.js';
 import { perfisRouter } from './routes/perfis.js';
@@ -99,6 +105,8 @@ app.use('/api/config', configRouter(io));
 app.use('/api/colunas', colunasRouter(io));
 app.use('/api/leads', leadsRouter(io));
 app.use('/api/aprovacoes', aprovacoesRouter(io));
+app.use('/api/compromissos', compromissosRouter(io));
+app.use('/api/relatorios-oka', relatoriosOkaRouter());
 app.use('/api/filas', filasRouter(io));
 app.use('/api/roletas', roletasRouter(io));
 app.use('/api/perfis', perfisRouter(io));
@@ -135,6 +143,10 @@ const varrerMinuto = () => {
   lembretesCreditoDaHora().catch(err => console.error('Crédito: lembrete falhou —', err.message));
   desligarFimDeExpediente(io).catch(err => console.error('Roleta: fim de expediente falhou —', err.message));
   reatribuirSlaVencido(io).catch(err => console.error('Roleta: SLA falhou —', err.message));
+  distribuirRecadastrosPendentes(io).catch(err => console.error('Roleta: recadastros falhou —', err.message));
+  avisarCompromissosEquipe().catch(err => console.error('Agenda: compromissos falhou —', err.message));
+  avisarAniversarios().catch(err => console.error('Agenda: aniversários falhou —', err.message));
+  avisarPosVenda().catch(err => console.error('Agenda: pós-venda falhou —', err.message));
 };
 varrerMinuto();
 setInterval(varrerMinuto, 60 * 1000);
@@ -143,6 +155,12 @@ setInterval(varrerMinuto, 60 * 1000);
 const vigiarFacebook = () => verificarConexoesFacebook().catch(err => console.error('Facebook: verificação falhou —', err.message));
 setTimeout(vigiarFacebook, 60 * 1000);
 setInterval(vigiarFacebook, 6 * 60 * 60 * 1000);
+
+// erro em rota: responde 500 (e registra) em vez de deixar a tela esperando
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Erro na rota:', err.message);
+  if (!res.headersSent) res.status(500).json({ error: 'Erro interno — tente de novo' });
+});
 
 ensureBucket()
   .catch(err => console.error('MinIO: não foi possível preparar o bucket —', err.message))

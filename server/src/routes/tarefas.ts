@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, gte, inArray, lte, or } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tarefas, leads, perfis, notificacoes } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -29,6 +29,8 @@ export function tarefasRouter(io: SocketServer) {
     if (role === 'corretor') conds.push(eq(tarefas.corretorId, sub));
     if (typeof req.query.de === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.de)) conds.push(gte(tarefas.venceEm, new Date(req.query.de + 'T00:00:00')));
     if (typeof req.query.ate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.ate)) conds.push(lte(tarefas.venceEm, new Date(req.query.ate + 'T23:59:59')));
+    // lembretes importados da v1 são histórico: o próximo contato de verdade de cada lead está no próprio lead
+    if (req.query.importadas !== '1') conds.push(isNull(tarefas.okaId));
     if (req.query.pendentes === '1') conds.push(eq(tarefas.concluida, false));
     // sem período pedido: abertas + concluídas nos últimos 30 dias (histórico velho só por período)
     else if (!req.query.de && !req.query.ate && req.query.todas !== '1') {

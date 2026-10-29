@@ -51,7 +51,7 @@ export interface SiteConfig {
   rodapeTexto: string;
 }
 export interface SiteState { slug: string; publicado: boolean; config: SiteConfig }
-export interface RebatidasStatus { limite: number; puxadasHoje: number; tarefasAtrasadas: number; disponiveis: number }
+export interface RebatidasStatus { limite: number; porClique?: number; puxadasHoje: number; tarefasAtrasadas: number; disponiveis: number }
 export interface ImovelInput {
   tipo: string; finalidade: string; titulo: string;
   endereco?: string | null; cidade?: string | null; estado?: string | null;
@@ -67,6 +67,8 @@ export interface RemoteTreinamento { id: string; titulo: string; descricao: stri
 export interface TreinamentoInput { titulo: string; descricao?: string | null; duracaoTexto?: string | null; categoria?: string | null; videoUrl?: string | null }
 
 export interface RemoteNotificacao { id: string; tipo: string; titulo: string; texto: string | null; lida: boolean; criadoEm: string; leadId?: string | null }
+/** Compromisso da equipe (reunião, treinamento) — aparece pra todos. */
+export interface Compromisso { id: string; titulo: string; tipo: string; inicio: string; fim: string | null; local: string | null; observacao: string | null; criadoPor: string | null; autorNome: string | null }
 /** Pedido esperando o dono/gerente: descarte extremo ou venda registrada. */
 export interface Aprovacao {
   id: string; nome: string; telefone: string; campanha: string | null; corretorNome: string | null;
@@ -113,7 +115,7 @@ export interface AuthUser { id: string; nome: string; email: string; role: 'dono
 export const roleLabel: Record<AuthUser['role'], Role> = { dono: 'Dono', gerente: 'Gerente', corretor: 'Corretor' };
 
 export type LeadTab = 'detalhes' | 'chat' | 'followup' | 'historico';
-export type BolsaoTab = 'novos' | 'rebatidas' | 'descartados' | 'descadastrar' | 'roletalog';
+export type BolsaoTab = 'novos' | 'rebatidas' | 'presos' | 'descartados' | 'descadastrar' | 'roletalog';
 export type AlertKind = 'lead' | 'visita' | 'credito' | 'plantao' | 'tarefa' | 'fora-horario' | null;
 
 export interface ConfirmState { titulo: string; texto: string; ok: string; fn: () => void }
@@ -320,7 +322,10 @@ interface AppState {
   setMembrosRoleta: (id: string, corretorIds: string[]) => Promise<void>;
   rebatidasStatus: RebatidasStatus | null;
   fetchRebatidasStatus: () => Promise<void>;
-  puxarRebatida: () => Promise<void>;
+  puxarRebatida: (cidade?: string) => Promise<void>;
+  reativarLead: (id: string) => Promise<void>;
+  cidadesBolsao: string[];
+  fetchCidadesBolsao: () => Promise<void>;
   limiteRebatidasDia: number;
   fetchLimiteRebatidas: () => Promise<void>;
   salvarLimiteRebatidas: (valor: number) => Promise<void>;
@@ -348,6 +353,10 @@ interface AppState {
   alertasModal: RemoteNotificacao[];
   fecharAlertaModal: (id: string) => void;
   toggleAlmoco: (corretorId: string) => Promise<void>;
+  compromissos: Compromisso[];
+  fetchCompromissos: () => Promise<void>;
+  salvarCompromisso: (dados: Partial<Compromisso> & { titulo: string; inicio: string }, id?: string) => Promise<boolean>;
+  cancelarCompromisso: (id: string) => Promise<void>;
   creditoVisto: (leadId: string) => Promise<void>;
   creditoPendencia: (leadId: string, observacao: string) => Promise<boolean>;
   setMoverPendente: (v: AppState['moverPendente']) => void;
@@ -542,7 +551,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   convId: null, convDraft: '', convQuery: '', convCorretor: 'Todos os corretores', convTyping: false,
 
   discardOpen: false, discardWarn: null,
-  moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [], alertasModal: [],
+  moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [], alertasModal: [], compromissos: [],
 
   conn: { 'Camila Rocha': true, 'Diego Antunes': true, 'Fernanda Lopes': false, 'Marcelo Braga': false, 'Priscila Nunes': true, 'Rafael Teixeira': false },
   qrFor: null, importOpen: false, newLeadOpen: false, templates: [], imoveis: [], linksUteis: [], treinamentos: [],
@@ -664,6 +673,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     socket.off('lead:created').on('lead:created', upsert);
     socket.off('lead:updated').on('lead:updated', upsert);
+    socket.off('compromissos:mudou').on('compromissos:mudou', () => { void get().fetchCompromissos(); });
     socket.off('notificacao:nova').on('notificacao:nova', (n: RemoteNotificacao) => {
       set(s => ({
         notificacoes: [n, ...s.notificacoes.filter(x => x.id !== n.id)].slice(0, 50),
@@ -774,7 +784,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const [colunas, perfis, leadsRaw, filaRaw, tagsRaw] = await Promise.all([
         apiFetch<RemoteColuna[]>('/api/colunas', token),
         apiFetch<RemotePerfil[]>('/api/perfis', token),
-        apiFetch<RemoteLead[]>('/api/leads', token),
+        // 1ª etapa: só os leads em atendimento — a tela aparece rápido
+        apiFetch<RemoteLead[]>('/api/leads?parte=principal', token),
         apiFetch<RemoteFilaRow[]>('/api/filas', token),
         apiFetch<RemoteTag[]>('/api/tags', token),
       ]);
@@ -783,6 +794,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       const fila = filaRaw.map(f => ({ corretorId: f.corretorId, nome: f.nome, ativo: f.emPlantao }));
       set({ colunasRemotas: colunas, perfisRemotos: perfis, leads, leadsCorretorIds, fila, tags: tagsRaw, kanbanLoading: false });
       if (get().me?.role !== 'corretor') void get().fetchAprovacoes();
+      // 2ª etapa, em segundo plano: o arquivo (sem dono / descartados — milhares) completa Bolsão e REBATIDA
+      if (get().me?.role !== 'corretor') {
+        apiFetch<RemoteLead[]>('/api/leads?parte=arquivo', token).then(resto => {
+          const { colunasRemotas, perfisRemotos } = get();
+          const extra = resto.map(r => mapRemoteLead(r, colunasRemotas, perfisRemotos));
+          set(s => {
+            const ja = new Set(s.leads.map(l => l.id));
+            return {
+              leads: [...s.leads, ...extra.filter(l => !ja.has(l.id))],
+              leadsCorretorIds: { ...s.leadsCorretorIds, ...Object.fromEntries(resto.map(r => [r.id, r.corretorId])) },
+            };
+          });
+        }).catch(() => {});
+      }
     } catch (e) {
       get().toast('Não foi possível carregar os leads do servidor');
       set({ kanbanLoading: false });
@@ -882,6 +907,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (e.motivo === 'registrar_venda') { set({ vendaLeadId: id }); get().toast(e.message); return; }
         get().toast(e.status === 409 ? e.message : 'Não deu pra salvar — ' + l.nome + ' voltou pra coluna anterior');
       });
+  },
+  fetchCompromissos: async () => {
+    const token = get().token;
+    if (!token) return;
+    try { set({ compromissos: await apiFetch<Compromisso[]>('/api/compromissos', token) }); } catch { /* */ }
+  },
+  salvarCompromisso: async (dados, id) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      await apiFetch('/api/compromissos' + (id ? '/' + id : ''), token, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(dados) });
+      await get().fetchCompromissos();
+      get().toast(id ? 'Compromisso atualizado' : 'Compromisso criado — todo mundo vê e recebe aviso 1h antes');
+      return true;
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível salvar'); return false; }
+  },
+  cancelarCompromisso: async id => {
+    const token = get().token;
+    if (!token) return;
+    try { await apiFetch('/api/compromissos/' + id, token, { method: 'DELETE' }); await get().fetchCompromissos(); get().toast('Compromisso cancelado'); }
+    catch (e) { get().toast((e as ApiError).message || 'Não foi possível cancelar'); }
   },
   toggleAlmoco: async corretorId => {
     const token = get().token;
@@ -1509,19 +1555,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!token) return;
     try { set({ rebatidasStatus: await apiFetch('/api/leads/rebatidas/status', token) }); } catch { /* ignora */ }
   },
-  puxarRebatida: async () => {
+  puxarRebatida: async cidade => {
     const token = get().token;
     if (!token) return;
     try {
-      const r = await apiFetch<{ lead: RemoteLead; status: RebatidasStatus }>('/api/leads/rebatidas/puxar', token, { method: 'POST' });
+      const r = await apiFetch<{ leads: RemoteLead[]; total: number; status: RebatidasStatus }>('/api/leads/rebatidas/puxar', token, { method: 'POST', body: JSON.stringify(cidade ? { cidade } : {}) });
       set({ rebatidasStatus: r.status });
-      const mapped = mapRemoteLead(r.lead, get().colunasRemotas, get().perfisRemotos);
-      set(s => ({ leads: s.leads.some(l => l.id === mapped.id) ? s.leads.map(l => (l.id === mapped.id ? mapped : l)) : [...s.leads, mapped] }));
-      get().toast(r.lead.nome + ' voltou pra sua carteira');
+      const novos = r.leads.map(x => mapRemoteLead(x, get().colunasRemotas, get().perfisRemotos));
+      set(s => ({ leads: [...s.leads.filter(l => !novos.some(n => n.id === l.id)), ...novos] }));
+      get().toast(r.total === 1 ? r.leads[0].nome + ' veio pra sua carteira (REBATIDA)' : r.total + ' rebatidas vieram pra sua carteira (coluna REBATIDA)');
     } catch (e) {
       get().toast((e as ApiError).message || 'Não foi possível puxar');
       get().fetchRebatidasStatus();
     }
+  },
+  reativarLead: async id => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      await apiFetch('/api/leads/' + id + '/reativar', token, { method: 'POST' });
+      get().toast('Lead reativado — voltou pro bolsão');
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível reativar'); }
+  },
+  cidadesBolsao: [],
+  fetchCidadesBolsao: async () => {
+    const token = get().token;
+    if (!token) return;
+    try { set({ cidadesBolsao: await apiFetch<string[]>('/api/leads/rebatidas/cidades', token) }); } catch { /* */ }
   },
   fetchLimiteRebatidas: async () => {
     const token = get().token;

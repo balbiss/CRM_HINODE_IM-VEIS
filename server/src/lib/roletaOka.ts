@@ -146,3 +146,22 @@ export async function estadoRoleta(imobiliariaId: string) {
     .from(perfis).where(eq(perfis.imobiliariaId, imobiliariaId));
   return rows.map(r => ({ corretorId: r.id, emAlmoco: r.emAlmoco, advertencias: r.sem === semana ? r.adv : 0 }));
 }
+
+let ultimoRecadastro = 0;
+/** v1 distribuir_recadastros_pendentes (a cada 5 min): quem se cadastrou de novo nos últimos 7 dias e
+ *  ficou sem corretor (roleta fechada na hora) entra na roleta assim que ela abre. */
+export async function distribuirRecadastrosPendentes(io: SocketServer, agora = new Date()) {
+  if (+agora - ultimoRecadastro < 5 * 60000 || !expedienteAberto(agora)) return;
+  ultimoRecadastro = +agora;
+  const pendentes = await db.select({ id: leads.id, imobiliariaId: leads.imobiliariaId }).from(leads).where(and(
+    isNull(leads.corretorId), gt(leads.recadastroEm, new Date(+agora - 7 * 86400000)), eq(leads.descartePendenteAprovacao, false),
+    sql`coalesce(${leads.motivoDescarte}, '') !~ '^(Descadastrar|Já Comprou|Contato Errado)'`,
+    sql`(${leads.descartadoEm} is null or ${leads.descartadoEm} < ${leads.recadastroEm})`,
+    sql`coalesce(${leads.iaStatus}::text, '') <> 'atendendo'`,
+  )).orderBy(asc(leads.recadastroEm));
+  const { distribuirLead } = await import('./roleta.js');
+  for (const p of pendentes) {
+    const quem = await distribuirLead(io, p.imobiliariaId, p.id);
+    if (quem) registrarEvento(p.imobiliariaId, p.id, 'roleta', 'Lead se cadastrou de novo fora do horário da roleta e foi entregue assim que ela abriu', 'Roleta');
+  }
+}

@@ -1,309 +1,233 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { canalPill, PILL } from '../lib/format';
-import { css } from '../lib/css';
-import { ChatAvatar } from '../components/ChatAvatar';
+import { MOTIVOS_DESCARTE_EXTREMO, type Lead } from '../lib/data';
+import { dataHoraCurta } from '../lib/datas';
 import type { BolsaoTab } from '../store/appStore';
 
-const MOTIVOS_EXTREMOS = ['Descadastrar', 'Já Comprou'];
-
-function cidadeDe(imovelSub: string): string {
-  // "Itaim Bibi, São Paulo · 248 m²" -> "São Paulo"
-  const antesDoM2 = imovelSub.split('·')[0] || '';
-  const partes = antesDoM2.split(',').map(p => p.trim());
-  return partes[1] || partes[0] || '';
-}
+/** Distribuição de Leads (v1): 6 abas pra dono/gerente; corretor usa o "+ Mais Rebatidas". */
+const norm = (t?: string | null) => (t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+const extremo = (m?: string | null) => MOTIVOS_DESCARTE_EXTREMO.some(x => (m ?? '').startsWith(x.split(' (')[0]));
+const LOTE = 80;
 
 export default function Bolsao() {
   const allLeads = useAppStore(s => s.leads);
+  const colunas = useAppStore(s => s.colunasRemotas);
+  const perfis = useAppStore(s => s.perfisRemotos);
   const bolsaoTab = useAppStore(s => s.bolsaoTab);
   const setBolsaoTab = useAppStore(s => s.setBolsaoTab);
-  const bolsaoAssume = useAppStore(s => s.bolsaoAssume);
-  const bolsaoDiscard = useAppStore(s => s.bolsaoDiscard);
   const puxarRebatida = useAppStore(s => s.puxarRebatida);
   const rebatidasStatus = useAppStore(s => s.rebatidasStatus);
   const fetchRebatidasStatus = useAppStore(s => s.fetchRebatidasStatus);
-  const limiteRebatidasDia = useAppStore(s => s.limiteRebatidasDia);
-  const fetchLimiteRebatidas = useAppStore(s => s.fetchLimiteRebatidas);
-  const salvarLimiteRebatidas = useAppStore(s => s.salvarLimiteRebatidas);
+  const cidadesBolsao = useAppStore(s => s.cidadesBolsao);
+  const fetchCidades = useAppStore(s => s.fetchCidadesBolsao);
+  const reativarLead = useAppStore(s => s.reativarLead);
+  const transferirLeads = useAppStore(s => s.transferirLeads);
   const openLead = useAppStore(s => s.openLead);
-  const toast = useAppStore(s => s.toast);
+  const ask = useAppStore(s => s.ask);
+  const roletaLog = useAppStore(s => s.roletaLog);
+  const fetchRoletaLog = useAppStore(s => s.fetchRoletaLog);
   const { isManager } = useRoleInfo();
-  useEffect(() => { fetchRebatidasStatus(); fetchLimiteRebatidas(); }, [fetchRebatidasStatus, fetchLimiteRebatidas]);
-  const [limiteEdit, setLimiteEdit] = useState('');
-  useEffect(() => { setLimiteEdit(String(limiteRebatidasDia)); }, [limiteRebatidasDia]);
+  useEffect(() => { fetchRebatidasStatus(); fetchCidades(); fetchRoletaLog(); }, [fetchRebatidasStatus, fetchCidades, fetchRoletaLog]);
+
   const [query, setQuery] = useState('');
-  const [cidade, setCidade] = useState('Todas as Cidades');
+  const [cidade, setCidade] = useState('');
+  const [cidadePuxar, setCidadePuxar] = useState('');
   const [de, setDe] = useState('');
   const [ate, setAte] = useState('');
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [visivel, setVisivel] = useState(LOTE);
+  const [soRecusas, setSoRecusas] = useState(false);
+  useEffect(() => { setSel(new Set()); setVisivel(LOTE); }, [bolsaoTab]);
 
-  const gerenciaisTabs: [BolsaoTab, string][] = [
-    ['novos', 'Leads Novos'], ['rebatidas', 'Rebatidas Geral'],
+  const tabs: [BolsaoTab, string][] = [
+    ['novos', 'Leads Novos'], ['rebatidas', 'Rebatidas Geral (Bolsão)'], ['presos', 'Presos para Redistribuir'],
     ['descartados', 'Leads Descartados'], ['descadastrar', 'Lead Descadastrar'], ['roletalog', 'Histórico da Roleta'],
   ];
-  const corretorTabs: [BolsaoTab, string][] = [['rebatidas', 'Rebatidas'], ['roletalog', 'Histórico da Roleta']];
-  const tabs = isManager ? gerenciaisTabs : corretorTabs;
-  const bTab: BolsaoTab = tabs.some(([id]) => id === bolsaoTab) ? bolsaoTab : 'rebatidas';
+  const bTab: BolsaoTab = tabs.some(([id]) => id === bolsaoTab) ? bolsaoTab : 'novos';
+  const colNovo = colunas.find(c => c.slug === 'novo')?.id;
 
-  const cidades = useMemo(() => Array.from(new Set(allLeads.map(l => cidadeDe(l.imovelSub)).filter(Boolean))), [allLeads]);
-
-  const filtrados = useMemo(() => {
+  const filtroTexto = (l: Lead) => {
     const q = query.trim().toLowerCase();
-    return allLeads.filter(l => {
-      if (q && !(l.nome.toLowerCase().includes(q) || l.tel.includes(q) || l.corretor.toLowerCase().includes(q))) return false;
-      if (cidade !== 'Todas as Cidades' && cidadeDe(l.imovelSub) !== cidade) return false;
-      return true;
-    });
-  }, [allLeads, query, cidade]);
+    if (q && !(l.nome.toLowerCase().includes(q) || l.tel.includes(q) || l.corretor.toLowerCase().includes(q))) return false;
+    if (cidade && norm(l.bairroInteresse) !== norm(cidade)) return false;
+    return true;
+  };
+  const noPeriodo = (iso?: string) => {
+    if (!iso) return !de && !ate;
+    const d = iso.slice(0, 10);
+    return (!de || d >= de) && (!ate || d <= ate);
+  };
+  const porData = (a: Lead, b: Lead) => +new Date(a.criadoEm ?? 0) - +new Date(b.criadoEm ?? 0);
 
-  const leadsNovos = filtrados.filter(l => l.col === 'novo');
-  const rebatidasGeral = filtrados.filter(l => l.col === 'rebatida' && !MOTIVOS_EXTREMOS.includes(l.motivo));
-  const descadastrar = filtrados.filter(l => l.col === 'rebatida' && MOTIVOS_EXTREMOS.includes(l.motivo));
-  const roletaLog = useAppStore(s => s.roletaLog);
-  const [soRecusas, setSoRecusas] = useState(false);
-  const logVisivel = soRecusas ? roletaLog.filter(r => r.tipo === 'recusa') : roletaLog;
-  const ORIGEM: Record<string, string> = { roleta: 'Roleta automática', importacao: 'Planilha', 'rebatida-puxada': 'Puxou do bolsão' };
-  const fetchRoletaLog = useAppStore(s => s.fetchRoletaLog);
-  useEffect(() => { fetchRoletaLog(); }, [fetchRoletaLog]);
+  const abas = useMemo(() => {
+    const base = allLeads.filter(filtroTexto);
+    const semDono = base.filter(l => !l.corretorId && !l.descartePendente);
+    return {
+      novos: semDono.filter(l => !l.descartadoEm && !l.jaTeveCorretor && noPeriodo(l.criadoEm)).sort((a, b) => -porData(a, b)),
+      rebatidas: semDono.filter(l => !l.descartadoEm).sort(porData).slice(0, 500),
+      presos: base.filter(l => l.corretorId && !l.descartadoEm && l.colunaId === colNovo
+        && ((l.tentativasContato ?? 0) >= 5 || Date.now() - +new Date(l.entrouNaColunaEm ?? l.criadoEm ?? 0) > 24 * 3600000)),
+      descartados: base.filter(l => l.descartadoEm && !extremo(l.motivo)).sort((a, b) => +new Date(b.descartadoEm!) - +new Date(a.descartadoEm!)),
+      descadastrar: base.filter(l => l.descartadoEm && extremo(l.motivo)).sort((a, b) => +new Date(b.descartadoEm!) - +new Date(a.descartadoEm!)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLeads, query, cidade, de, ate, colNovo]);
 
-  // Listas como "Rebatida" chegam a ter milhares de leads reais — renderizar tudo de uma vez
-  // travava a troca de tela inteira (React montando/desmontando milhares de linhas no DOM).
-  const LOTE = 80;
-  const [visivelNovos, setVisivelNovos] = useState(LOTE);
-  const [visivelRebatidas, setVisivelRebatidas] = useState(LOTE);
-  const [visivelDescartados, setVisivelDescartados] = useState(LOTE);
-  const [visivelDescadastrar, setVisivelDescadastrar] = useState(LOTE);
-
-  // Quantos leads entraram hoje/ontem (por criadoEm, não pelo status atual — um lead que já foi
-  // atendido e movido de coluna continua contando no dia em que de fato entrou).
-  const entradas = useMemo(() => {
-    const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0);
-    const inicioOntem = new Date(inicioHoje); inicioOntem.setDate(inicioOntem.getDate() - 1);
-    let hoje = 0, ontem = 0;
-    for (const l of allLeads) {
-      if (!l.criadoEm) continue;
-      const d = new Date(l.criadoEm);
-      if (d >= inicioHoje) hoje++;
-      else if (d >= inicioOntem) ontem++;
-    }
-    return { hoje, ontem };
+  const hojeOntem = useMemo(() => {
+    const ini = new Date(); ini.setHours(0, 0, 0, 0);
+    const ontem = new Date(ini); ontem.setDate(ini.getDate() - 1);
+    return allLeads.filter(l => !l.corretorId && !l.jaTeveCorretor && !l.descartadoEm && l.criadoEm && new Date(l.criadoEm) >= ontem).length;
   }, [allLeads]);
+
+  const rs = rebatidasStatus;
+  const bloqueado = !!rs && (rs.tarefasAtrasadas > 0 || rs.puxadasHoje >= rs.limite || rs.disponiveis === 0);
+  const puxar = (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <select value={cidadePuxar} onChange={e => setCidadePuxar(e.target.value)} style={inp}>
+        <option value="">Todas as cidades</option>
+        {cidadesBolsao.map(c => <option key={c}>{c}</option>)}
+      </select>
+      <button onClick={async () => { await puxarRebatida(cidadePuxar || undefined); fetchRebatidasStatus(); }} disabled={bloqueado}
+        style={{ padding: '10px 16px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: bloqueado ? 0.5 : 1 }}>
+        + Mais Rebatidas
+      </button>
+      {rs && (
+        <span style={{ fontSize: 12, color: rs.tarefasAtrasadas > 0 ? 'var(--terra)' : 'var(--muted)' }}>
+          {rs.tarefasAtrasadas > 0 ? rs.tarefasAtrasadas + ' tarefa(s) atrasada(s) — resolva pra liberar'
+            : 'Hoje: ' + rs.puxadasHoje + ' de ' + rs.limite + ' · até ' + (rs.porClique ?? 10) + ' por clique'}
+        </span>
+      )}
+    </div>
+  );
+
+  if (!isManager) {
+    return (
+      <div>
+        <Cabecalho titulo="Rebatidas" sub="Puxe leads do bolsão pra sua carteira. Eles caem na coluna REBATIDA com contato marcado pra hoje." />
+        {puxar}
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', maxWidth: 620, lineHeight: 1.6, marginTop: 14 }}>
+          Até 10 por clique e 50 por dia. Só trava se você tiver tarefa atrasada de verdade (contato marcado pra um dia que já passou).
+          Nunca volta pra você um lead que já foi seu. Descartados só voltam pro bolsão depois de um tempo: Sem Resposta 3 dias,
+          Parou de Responder 5 dias, Sem Interesse e Aprovado/Desistiu 20 dias.
+        </p>
+      </div>
+    );
+  }
+
+  const lista: Lead[] = bTab === 'roletalog' ? [] : abas[bTab];
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const corretores = perfis.filter(p => !p.bloqueado && p.role !== 'dono');
+  const logVisivel = soRecusas ? roletaLog.filter(r => r.tipo === 'recusa') : roletaLog;
+  const ORIGEM: Record<string, string> = { roleta: 'Roleta automática', automatico: 'Roleta (5 min sem contato)', manual: 'Transferido', 'rebatida-puxada': 'Puxou do bolsão', importacao: 'Planilha' };
 
   return (
     <div>
-      <div className="page-head" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
-        <div>
-          <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Recuperação</p>
-          <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: '0 0 8px', lineHeight: 1.2 }}>Bolsão de Leads</h1>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}><b style={{ color: 'var(--ink)', fontSize: 15, fontWeight: 700 }}>{entradas.hoje}</b> entraram hoje</span>
-            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}><b style={{ color: 'var(--ink)', fontSize: 15, fontWeight: 700 }}>{entradas.ontem}</b> entraram ontem</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {isManager && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-              Limite por corretor/dia
-              <input
-                type="number" min={0} value={limiteEdit}
-                onChange={e => setLimiteEdit(e.target.value)}
-                onBlur={() => { const v = Math.max(0, parseInt(limiteEdit || '0', 10) || 0); if (v !== limiteRebatidasDia) salvarLimiteRebatidas(v); }}
-                style={{ width: 56, padding: '7px 8px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 13 }}
-              />
-              <span style={{ fontSize: 11 }}>0 = ilimitado</span>
-            </label>
-          )}
-          {!isManager && rebatidasStatus && (
-            <span style={{ fontSize: 12, color: rebatidasStatus.tarefasAtrasadas > 0 ? 'var(--terra)' : 'var(--muted)' }}>
-              {rebatidasStatus.tarefasAtrasadas > 0
-                ? rebatidasStatus.tarefasAtrasadas + ' tarefa(s) atrasada(s) — resolva pra liberar'
-                : rebatidasStatus.limite > 0
-                  ? 'Você puxou ' + rebatidasStatus.puxadasHoje + ' de ' + rebatidasStatus.limite + ' hoje'
-                  : rebatidasStatus.puxadasHoje + ' puxadas hoje'}
-            </span>
-          )}
-          {(() => {
-            const rs = rebatidasStatus;
-            const bloqueado = !!rs && (rs.tarefasAtrasadas > 0 || (rs.limite > 0 && rs.puxadasHoje >= rs.limite) || rs.disponiveis === 0);
-            return (
-              <button
-                onClick={() => puxarRebatida()}
-                disabled={!isManager && bloqueado}
-                title={rs && rs.disponiveis === 0 ? 'Bolsão vazio' : ''}
-                style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: !isManager && bloqueado ? 0.5 : 1 }}
-              >
-                Puxar rebatida{rs && rs.disponiveis > 0 ? ' (' + rs.disponiveis + ' no bolsão)' : ''}
-              </button>
-            );
-          })()}
-        </div>
+      <Cabecalho titulo="Distribuição de Leads" sub="Leads que não estão sendo atendidos como deveriam." />
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        <span style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '8px 14px', background: 'var(--card)', fontSize: 12.5, color: 'var(--muted)' }}>
+          <b style={{ color: 'var(--ink)', fontSize: 16 }}>{hojeOntem}</b> leads novos hoje + ontem
+        </span>
+        {puxar}
       </div>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Buscar por nome, telefone ou corretor…"
-          style={{ flex: '1 1 220px', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13 }}
-        />
-        <select value={cidade} onChange={e => setCidade(e.target.value)} style={{ padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13 }}>
-          <option>Todas as Cidades</option>
-          {cidades.map(c => <option key={c}>{c}</option>)}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por nome, telefone ou corretor…" style={{ ...inp, flex: '1 1 220px' }} />
+        <select value={cidade} onChange={e => setCidade(e.target.value)} style={inp}>
+          <option value="">Todas as cidades</option>
+          {cidadesBolsao.map(c => <option key={c}>{c}</option>)}
         </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="date" value={de} onChange={e => setDe(e.target.value)} style={{ padding: '9px 10px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13 }} />
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>até</span>
-          <input type="date" value={ate} onChange={e => setAte(e.target.value)} style={{ padding: '9px 10px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13 }} />
-        </div>
+        {bTab === 'novos' && (
+          <>
+            <input type="date" value={de} onChange={e => setDe(e.target.value)} style={inp} />
+            <input type="date" value={ate} onChange={e => setAte(e.target.value)} style={inp} />
+          </>
+        )}
       </div>
-
-      <div style={{ display: 'flex', gap: 20, borderBottom: '1px solid var(--line)', marginBottom: 18, overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 20, borderBottom: '1px solid var(--line)', marginBottom: 14, overflowX: 'auto' }}>
         {tabs.map(([id, label]) => (
           <button key={id} onClick={() => setBolsaoTab(id)} style={{ padding: '0 0 12px', border: 'none', background: 'none', fontSize: 13.5, fontWeight: bTab === id ? 700 : 500, whiteSpace: 'nowrap', color: bTab === id ? 'var(--ink)' : 'var(--muted)', borderBottom: '2px solid ' + (bTab === id ? 'var(--terra)' : 'transparent'), marginBottom: -1 }}>
-            {label}
+            {label}{id !== 'roletalog' ? ' (' + abas[id as Exclude<BolsaoTab, 'roletalog'>].length + (id === 'rebatidas' && abas.rebatidas.length === 500 ? '+' : '') + ')' : ''}
           </button>
         ))}
       </div>
 
-      {bTab === 'novos' && (
-        <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {leadsNovos.slice(0, visivelNovos).map(l => (
-            <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
-                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.imovelSub} · {l.tel}</span>
-              </span>
-              <span style={css(canalPill(l.canal))}>{l.canal}</span>
-              <span style={{ fontSize: 12.5, width: 140 }}>{l.corretor || '— sem corretor —'}</span>
-              <button onClick={() => openLead(l.id)} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Abrir</button>
-            </div>
-          ))}
-          {leadsNovos.length > visivelNovos && (
-            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
-              <button onClick={() => setVisivelNovos(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
-                Carregar mais ({leadsNovos.length - visivelNovos} restantes)
-              </button>
-            </div>
-          )}
-          {leadsNovos.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead novo no momento.</p></div>}
+      {bTab !== 'roletalog' && sel.size > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{sel.size} selecionado(s)</span>
+          <select defaultValue="" onChange={e => {
+            const alvo = corretores.find(p => p.id === e.target.value);
+            e.target.value = '';
+            if (alvo) ask('Encaminhar ' + sel.size + ' lead(s) para ' + alvo.nome + '?', 'Lead que nunca teve corretor chega como novo (com aviso); os outros caem na REBATIDA dele.', 'Encaminhar', async () => { if (await transferirLeads([...sel], alvo.id)) setSel(new Set()); });
+          }} style={inp}>
+            <option value="" disabled>Encaminhar para…</option>
+            {corretores.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+          <button onClick={() => setSel(new Set())} style={{ border: 'none', background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>limpar</button>
         </div>
       )}
 
-      {bTab === 'rebatidas' && (
+      {bTab === 'roletalog' ? (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {rebatidasGeral.slice(0, visivelRebatidas).map(l => (
-            <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <ChatAvatar nome={l.nome} foto={l.foto} size={34} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
-                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.imovelSub} · {l.tel}</span>
-              </span>
-              <span style={css(canalPill(l.canal))}>{l.canal}</span>
-              <span style={{ fontSize: 12, color: 'var(--muted)', width: 110, textAlign: 'right' }}>{l.motivo}</span>
-              <button onClick={() => bolsaoAssume(l.id)} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Assumir</button>
-              <button onClick={() => bolsaoDiscard(l.id, l.nome)} style={{ padding: '7px 11px', border: 'none', borderRadius: 7, background: 'none', fontSize: 12.5, color: 'var(--muted)' }}>Descartar</button>
-            </div>
-          ))}
-          {rebatidasGeral.length > visivelRebatidas && (
-            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
-              <button onClick={() => setVisivelRebatidas(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
-                Carregar mais ({rebatidasGeral.length - visivelRebatidas} restantes)
-              </button>
-            </div>
-          )}
-          {rebatidasGeral.length === 0 && (
-            <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-              <div style={{ width: 28, height: 28, border: '1.5px solid var(--line)', transform: 'rotate(45deg)', margin: '0 auto 16px' }} />
-              <p style={{ fontSize: 14.5, margin: '0 0 4px' }}>Bolsão vazio.</p>
-              <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Todo lead rebatido já foi redistribuído.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {bTab === 'descartados' && (
-        <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-            <span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Motivo</span><span style={{ width: 140 }}>Último corretor</span><span style={{ width: 90 }}>Há</span>
+          <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--line)' }}>
+            <label style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={soRecusas} onChange={e => setSoRecusas(e.target.checked)} /> Só recusas</label>
           </div>
-          {rebatidasGeral.slice(0, visivelDescartados).map(l => (
-            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
-              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{l.nome}</span>
-              <span style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>{l.motivo}</span>
-              <span style={{ width: 140, fontSize: 13 }}>{l.corretor}</span>
-              <span style={{ width: 90, fontSize: 11.5, color: 'var(--muted)' }}>{l.dias === 0 ? 'hoje' : l.dias + 'd'}</span>
+          {logVisivel.map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: 14, padding: '11px 18px', borderBottom: '1px solid var(--line)', fontSize: 13, flexWrap: 'wrap' }}>
+              <span style={{ width: 110, color: 'var(--muted)' }}>{dataHoraCurta(r.criadoEm)}</span>
+              <span style={{ flex: 1, minWidth: 140, fontWeight: 600 }}>{r.leadNome}</span>
+              <span style={{ flex: 1, minWidth: 120 }}>{r.corretorNome}{r.paraNome ? ' → ' + r.paraNome : ''}</span>
+              <span style={{ color: 'var(--muted)' }}>{r.tipo === 'recusa' ? (r.origem === 'sem_resposta' ? 'Não respondeu a tempo' : 'Recusou') : ORIGEM[r.origem] ?? (r.origem.startsWith('oka:') ? 'CRM antigo' : r.origem)}</span>
             </div>
           ))}
-          {rebatidasGeral.length > visivelDescartados && (
-            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
-              <button onClick={() => setVisivelDescartados(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
-                Carregar mais ({rebatidasGeral.length - visivelDescartados} restantes)
-              </button>
-            </div>
-          )}
-          {rebatidasGeral.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead descartado registrado.</p></div>}
+          {logVisivel.length === 0 && <p style={vazio}>Nada no histórico ainda.</p>}
         </div>
-      )}
-
-      {bTab === 'descadastrar' && (
+      ) : (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          {descadastrar.slice(0, visivelDescadastrar).map(l => (
-            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>{l.nome}</span>
-                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{l.tel}</span>
-              </span>
-              <span style={css(PILL + 'background:var(--terraSoft);color:var(--terra)')}>{l.motivo}</span>
-              <button onClick={() => toast(l.nome + ' aprovado — saiu definitivamente da base')} style={{ padding: '7px 13px', border: 'none', borderRadius: 7, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600 }}>Aprovar</button>
-              <button onClick={() => toast('Descarte de ' + l.nome + ' recusado — volta pro corretor')} style={{ padding: '7px 13px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Recusar</button>
-            </div>
-          ))}
-          {descadastrar.length > visivelDescadastrar && (
-            <div style={{ padding: '14px 20px', textAlign: 'center' }}>
-              <button onClick={() => setVisivelDescadastrar(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>
-                Carregar mais ({descadastrar.length - visivelDescadastrar} restantes)
-              </button>
-            </div>
-          )}
-          {descadastrar.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhuma solicitação de descadastro pendente.</p></div>}
-        </div>
-      )}
-
-      {bTab === 'roletalog' && (
-        <>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          {([[false, 'Tudo'], [true, 'Só recusas']] as const).map(([v, t]) => (
-            <button key={t} onClick={() => setSoRecusas(v)} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1px solid ' + (soRecusas === v ? 'var(--terra)' : 'var(--line)'), background: soRecusas === v ? 'var(--terraSoft)' : 'var(--card)', color: soRecusas === v ? 'var(--terra)' : 'var(--muted)' }}>{t}</button>
-          ))}
-        </div>
-        <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
-          <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-            <span style={{ width: 130 }}>Data / hora</span><span style={{ flex: 1 }}>Lead</span><span style={{ flex: 1 }}>Corretor</span><span style={{ width: 200 }}>O que aconteceu</span>
-          </div>
-          {logVisivel.length === 0 && <div style={{ padding: '44px 20px', textAlign: 'center' }}><p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>{soRecusas ? 'Nenhuma recusa registrada.' : 'Nenhuma distribuição registrada ainda.'}</p></div>}
-          {logVisivel.map((r, i) => {
-            const dt = new Date(r.criadoEm);
-            return (
-              <div key={i} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--line)' }}>
-                <span style={{ width: 130, fontSize: 12.5, color: 'var(--muted)' }}>{dt.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} · {dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{r.leadNome}</span>
-                <span style={{ flex: 1, fontSize: 13 }}>{r.corretorNome}</span>
-                <span style={{ width: 200 }}>
-                  {r.tipo === 'recusa'
-                    ? <>
-                        <span style={css(PILL + 'background:var(--terraSoft);color:var(--terra)')}>{r.origem === 'sem_resposta' ? 'Não respondeu a tempo' : 'Recusou'}</span>
-                        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{r.paraNome ? 'foi para ' + r.paraNome : 'ficou sem corretor'}</span>
-                      </>
-                    : <span style={css(PILL + 'background:var(--oliveSoft);color:var(--olive)')}>{ORIGEM[r.origem] ?? r.origem}</span>}
+          {lista.slice(0, visivel).map(l => (
+            <div key={l.id} className="data-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 18px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+              {bTab !== 'descadastrar' && <input type="checkbox" checked={sel.has(l.id)} onChange={() => toggle(l.id)} />}
+              <button onClick={() => openLead(l.id)} style={{ flex: 1, minWidth: 180, textAlign: 'left', background: 'none', border: 'none', padding: 0 }}>
+                <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--ink)' }}>{l.nome}</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {[l.tel, l.bairroInteresse, l.campanha].filter(Boolean).join(' · ')}
                 </span>
-              </div>
-            );
-          })}
+              </button>
+              <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 120 }}>
+                {bTab === 'presos' ? l.corretor + ' · ' + ((l.tentativasContato ?? 0) >= 5 ? (l.tentativasContato + ' tentativas') : 'parado desde ' + dataHoraCurta(l.entrouNaColunaEm))
+                  : bTab === 'descartados' || bTab === 'descadastrar' ? (l.motivo || '—') + ' · ' + dataHoraCurta(l.descartadoEm ?? undefined)
+                  : 'entrou ' + dataHoraCurta(l.criadoEm)}
+              </span>
+              {bTab === 'descartados' && (
+                <button onClick={() => ask('Reativar ' + l.nome + '?', 'Volta pro bolsão do zero: sem corretor e sem o descarte.', 'Reativar', () => { void reativarLead(l.id); })}
+                  style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12, fontWeight: 600, color: 'var(--olive)' }}>Reativar</button>
+              )}
+            </div>
+          ))}
+          {lista.length > visivel && (
+            <div style={{ padding: 14, textAlign: 'center' }}>
+              <button onClick={() => setVisivel(v => v + LOTE)} style={{ padding: '9px 16px', border: '1px dashed var(--line)', borderRadius: 8, background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>Carregar mais ({lista.length - visivel} restantes)</button>
+            </div>
+          )}
+          {lista.length === 0 && <p style={vazio}>Nenhum lead aqui.</p>}
         </div>
-        </>
       )}
+      <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: 760 }}>
+        <b>Leads Novos</b>: chegaram e nunca tiveram corretor. <b>Rebatidas Geral</b>: todo lead sem dono (os 500 mais antigos; o filtro de cidade busca antes do corte).
+        <b> Presos</b>: com corretor, mas 5+ tentativas ou mais de 24h sem sair de LEAD NOVO. <b>Descartados</b>: descartes normais (Reativar devolve pro bolsão).
+        <b> Descadastrar</b>: descartes extremos já aprovados — definitivos.
+      </p>
     </div>
   );
 }
+
+function Cabecalho({ titulo, sub }: { titulo: string; sub: string }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <p style={{ fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 4px' }}>Recuperação</p>
+      <h1 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 24, margin: 0, lineHeight: 1.2 }}>{titulo}</h1>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '5px 0 0' }}>{sub}</p>
+    </div>
+  );
+}
+const inp: React.CSSProperties = { padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13 };
+const vazio: React.CSSProperties = { padding: '30px 18px', textAlign: 'center', fontSize: 13, color: 'var(--muted)', margin: 0 };

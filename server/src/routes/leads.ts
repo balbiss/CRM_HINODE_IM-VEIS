@@ -25,13 +25,18 @@ export function leadsRouter(io: SocketServer) {
   router.get('/', async (req, res) => {
     const { imobiliariaId, role, sub } = req.auth!;
     // lead guardado de planilha (importacaoPendente) não aparece: fica na tela de Importações
+    // ?parte=principal → leads em atendimento (a tela abre rápido); ?parte=arquivo → o resto (sem dono e
+    // descartados/rebatidas, milhares), carregado em segundo plano. Sem parte = tudo.
+    const arquivo = sql`(${leads.corretorId} is null and (${leads.descartadoEm} is not null
+      or ${leads.colunaId} in (select id from colunas_kanban where slug in ('rebatida','descadastrar'))))`;
+    const parte = req.query.parte === 'principal' ? sql`not ${arquivo}` : req.query.parte === 'arquivo' ? arquivo : undefined;
     const scoped = role === 'corretor'
       ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub), eq(leads.importacaoPendente, false))
-      : and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.importacaoPendente, false));
+      : and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.importacaoPendente, false), parte);
     // sem os campos pesados que a lista não usa (respostas do Agente de IA, controle interno, id da v1)
     const { iaDados: _a, iaAguardandoDesde: _b, okaId: _c, recadastroOrigem: _d, iaTurnos: _e, iaMsgsCliente: _f,
       lembreteAniversarioAno: _g, lembretePosVendaEm: _h, ...colunasLista } = getTableColumns(leads);
-    const rows = await db.select(colunasLista).from(leads).where(scoped);
+    const rows = await db.select({ ...colunasLista, jaTeveCorretor: sql<boolean>`${leads.id} in (select lead_id from distribuicao_log)` }).from(leads).where(scoped);
     // etiquetas de cada lead (mesmo escopo — join por lead_id)
     const vinculos = await db.select({ leadId: leadTags.leadId, tagId: leadTags.tagId })
       .from(leadTags).innerJoin(leads, eq(leadTags.leadId, leads.id)).where(scoped);
@@ -488,57 +493,95 @@ export function leadsRouter(io: SocketServer) {
     res.json({ ok: true });
   });
 
-  // --- Puxar rebatidas do bolsão (corretor pega leads rebatidos sem dono) ---
+  // --- "+ Mais Rebatidas" (v1 puxar_mais_rebatidas): 10 por clique, 50 por dia, filtro de cidade,
+  // nunca devolve lead que já foi desse corretor, descartado só depois da quarentena do motivo.
+  // Trava se o corretor tiver tarefa atrasada de verdade (contato marcado pra um dia que já passou).
+  const LIMITE_DIA = 50, POR_CLIQUE = 10;
+  const COM_ACENTO = 'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', SEM_ACENTO = 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC';
   async function statusRebatidas(imobiliariaId: string, corretorId: string) {
-    const [imob] = await db.select({ limite: imobiliarias.limiteRebatidasDia }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
-    const limite = imob?.limite ?? 0;
-    const inicioDia = new Date(); inicioDia.setHours(0, 0, 0, 0);
+    const inicioDia = new Date(hojeSp() + 'T00:00:00-03:00');
     const [{ n: puxadasHoje }] = await db.select({ n: sql<number>`count(*)::int` }).from(distribuicaoLog)
       .where(and(eq(distribuicaoLog.corretorId, corretorId), eq(distribuicaoLog.origem, 'rebatida-puxada'), gte(distribuicaoLog.criadoEm, inicioDia)));
-    const [{ n: tarefasAtrasadas }] = await db.select({ n: sql<number>`count(*)::int` }).from(tarefas)
-      .where(and(eq(tarefas.corretorId, corretorId), eq(tarefas.concluida, false), lt(tarefas.venceEm, new Date())));
-    const [colReb] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
-      .where(and(eq(colunasKanban.imobiliariaId, imobiliariaId), eq(colunasKanban.slug, 'rebatida'))).limit(1);
-    const [{ n: disponiveis }] = colReb
-      ? await db.select({ n: sql<number>`count(*)::int` }).from(leads).where(and(eq(leads.colunaId, colReb.id), isNull(leads.corretorId)))
-      : [{ n: 0 }];
-    return { limite, puxadasHoje, tarefasAtrasadas, disponiveis, colRebId: colReb?.id ?? null };
+    const [{ n: tarefasAtrasadas }] = await db.select({ n: sql<number>`count(*)::int` }).from(leads)
+      .leftJoin(colunasKanban, eq(colunasKanban.id, leads.colunaId))
+      .where(and(eq(leads.corretorId, corretorId), lt(leads.proximoContatoEm, inicioDia), isNull(leads.descartadoEm),
+        eq(leads.descartePendenteAprovacao, false), eq(leads.vendaPendenteAprovacao, false), isNull(leads.dataFechamento),
+        sql`coalesce(${colunasKanban.slug}, '') <> 'followup_auto'`));
+    const [{ n: disponiveis }] = await db.select({ n: sql<number>`count(*)::int` }).from(leads)
+      .where(and(eq(leads.imobiliariaId, imobiliariaId), condicaoBolsao(corretorId, null)));
+    return { limite: LIMITE_DIA, porClique: POR_CLIQUE, puxadasHoje, tarefasAtrasadas, disponiveis };
+  }
+  /** Lead que pode ser puxado: sem dono, sem descarte pendente, fora da quarentena, que nunca foi desse corretor. */
+  function condicaoBolsao(corretorId: string, cidade: string | null) {
+    return and(
+      isNull(leads.corretorId), eq(leads.descartePendenteAprovacao, false), eq(leads.importacaoPendente, false),
+      sql`coalesce(${leads.iaStatus}::text, '') <> 'atendendo'`,
+      cidade ? sql`lower(btrim(translate(${leads.bairroInteresse}, ${COM_ACENTO}, ${SEM_ACENTO}))) = lower(btrim(translate(${cidade}, ${COM_ACENTO}, ${SEM_ACENTO})))` : undefined,
+      sql`not exists (select 1 from distribuicao_log d where d.lead_id = ${leads.id} and d.corretor_id = ${corretorId})`,
+      sql`(${leads.descartadoEm} is null
+        or (${leads.motivoDescarte} = 'Sem Resposta' and ${leads.descartadoEm} <= now() - interval '3 days')
+        or (${leads.motivoDescarte} = 'Parou de Responder' and ${leads.descartadoEm} <= now() - interval '5 days')
+        or (${leads.motivoDescarte} in ('Sem Interesse', 'Aprovado/Desistiu') and ${leads.descartadoEm} <= now() - interval '20 days'))`,
+    );
   }
 
   router.get('/rebatidas/status', async (req, res) => {
     const { imobiliariaId, sub } = req.auth!;
-    const s = await statusRebatidas(imobiliariaId, sub);
-    res.json({ limite: s.limite, puxadasHoje: s.puxadasHoje, tarefasAtrasadas: s.tarefasAtrasadas, disponiveis: s.disponiveis });
+    res.json(await statusRebatidas(imobiliariaId, sub));
+  });
+
+  // Cidades/bairros dos leads sem dono (grafias parecidas viram uma opção só).
+  router.get('/rebatidas/cidades', async (req, res) => {
+    const rows = await db.select({ b: leads.bairroInteresse, n: sql<number>`count(*)::int` }).from(leads)
+      .where(and(eq(leads.imobiliariaId, req.auth!.imobiliariaId), isNull(leads.corretorId), sql`btrim(coalesce(${leads.bairroInteresse}, '')) <> ''`))
+      .groupBy(leads.bairroInteresse);
+    const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const melhor = new Map<string, { b: string; n: number }>();
+    for (const r of rows) { const k = norm(r.b!); const m = melhor.get(k); if (!m || r.n > m.n) melhor.set(k, { b: r.b!, n: r.n }); }
+    res.json([...melhor.values()].map(x => x.b).sort((a, b) => a.localeCompare(b)));
   });
 
   router.post('/rebatidas/puxar', async (req, res) => {
     const { imobiliariaId, sub, nome, role } = req.auth!;
     const alvoId = role !== 'corretor' && typeof req.body?.corretorId === 'string' ? req.body.corretorId : sub;
+    const cidade = typeof req.body?.cidade === 'string' && req.body.cidade.trim() ? req.body.cidade.trim() : null;
     const s = await statusRebatidas(imobiliariaId, alvoId);
     if (s.tarefasAtrasadas > 0) return res.status(409).json({ error: 'Resolva suas ' + s.tarefasAtrasadas + ' tarefa(s) atrasada(s) antes de puxar rebatidas.', motivo: 'tarefas' });
-    if (s.limite > 0 && s.puxadasHoje >= s.limite) return res.status(409).json({ error: 'Você já puxou o máximo de ' + s.limite + ' rebatidas hoje.', motivo: 'limite' });
-    if (!s.colRebId) return res.status(400).json({ error: 'Coluna de rebatidas não configurada' });
+    if (s.puxadasHoje >= LIMITE_DIA) return res.status(409).json({ error: 'Limite diário de ' + LIMITE_DIA + ' rebatidas atingido.', motivo: 'limite' });
+    const qtd = Math.min(POR_CLIQUE, LIMITE_DIA - s.puxadasHoje);
+    const rebatida = await colunaPorSlug(imobiliariaId, 'rebatida');
+    const candidatos = await db.select({ id: leads.id }).from(leads)
+      .where(and(eq(leads.imobiliariaId, imobiliariaId), condicaoBolsao(alvoId, cidade)))
+      .orderBy(asc(leads.criadoEm)).limit(qtd);
+    const agora = new Date();
+    const puxados: (typeof leads.$inferSelect)[] = [];
+    for (const c of candidatos) {
+      const [row] = await db.update(leads).set({
+        corretorId: alvoId, colunaId: rebatida?.id, entrouNaColunaEm: agora, proximoContatoEm: agora, dataVisita: null, statusVisita: null,
+        dataAtribuicao: agora, primeiroContatoEm: null, descartadoEm: null, descartadoPor: null, motivoDescarte: null, ultimaAcaoEm: agora,
+      }).where(and(eq(leads.id, c.id), isNull(leads.corretorId))).returning();
+      if (!row) continue;
+      puxados.push(row);
+      await db.insert(distribuicaoLog).values({ imobiliariaId, leadId: row.id, corretorId: alvoId, origem: 'rebatida-puxada' });
+      registrarEvento(imobiliariaId, row.id, 'roleta', 'Rebatida puxada do bolsão' + (alvoId === sub ? ' por ' + nome : ''), nome);
+      io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    }
+    if (!puxados.length) return res.status(404).json({ error: cidade ? 'Nenhuma rebatida disponível em ' + cidade + '.' : 'Nenhuma rebatida disponível no bolsão agora.', motivo: 'vazio' });
+    res.json({ leads: puxados, lead: puxados[0], total: puxados.length, status: await statusRebatidas(imobiliariaId, alvoId) });
+  });
 
-    const [colAtend] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
-      .where(and(eq(colunasKanban.imobiliariaId, imobiliariaId), eq(colunasKanban.slug, 'atend'))).limit(1);
-
-    const [lead] = await db.select().from(leads)
-      .where(and(eq(leads.colunaId, s.colRebId), isNull(leads.corretorId), eq(leads.imobiliariaId, imobiliariaId)))
-      .orderBy(asc(leads.entrouNaColunaEm)).limit(1);
-    if (!lead) return res.status(404).json({ error: 'Nenhuma rebatida disponível no bolsão agora.', motivo: 'vazio' });
-
-    const [atualizado] = await db.update(leads)
-      .set({ corretorId: alvoId, colunaId: colAtend?.id ?? lead.colunaId, entrouNaColunaEm: new Date(), motivoDescarte: null })
-      .where(and(eq(leads.id, lead.id), isNull(leads.corretorId))).returning();
-    if (!atualizado) return res.status(409).json({ error: 'Alguém puxou essa rebatida primeiro. Tenta de novo.' });
-
-    await db.insert(distribuicaoLog).values({ imobiliariaId, leadId: lead.id, corretorId: alvoId, origem: 'rebatida-puxada' });
-    await notificar({ perfilId: alvoId, tipo: 'lead', titulo: 'Rebatida puxada', texto: atualizado.nome + ' voltou pra sua carteira.' });
-    registrarEvento(imobiliariaId, lead.id, 'roleta', 'Rebatida puxada do bolsão por ' + nome, nome);
-    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', atualizado);
-
-    const novo = await statusRebatidas(imobiliariaId, alvoId);
-    res.json({ lead: atualizado, status: { limite: novo.limite, puxadasHoje: novo.puxadasHoje, tarefasAtrasadas: novo.tarefasAtrasadas, disponiveis: novo.disponiveis } });
+  // Reativar descartado (v1 reativar_lead, dono/gerente): volta pro bolsão do zero, sem dono e sem o descarte.
+  router.post('/:id/reativar', requireRole('dono', 'gerente'), async (req, res) => {
+    const { imobiliariaId, nome } = req.auth!;
+    const rebatida = await colunaPorSlug(imobiliariaId, 'rebatida');
+    const [row] = await db.update(leads).set({
+      corretorId: null, descartadoEm: null, descartadoPor: null, motivoDescarte: null, descartePendenteAprovacao: false,
+      colunaId: rebatida?.id, tentativasContato: 0, proximoContatoEm: null, dataVisita: null, ultimaAcaoEm: new Date(), entrouNaColunaEm: new Date(),
+    }).where(and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId))).returning();
+    if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
+    registrarEvento(imobiliariaId, row.id, 'descarte', 'Lead reativado — voltou pro bolsão', nome);
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
   });
 
   // Linha do tempo do lead (eventos reais registrados pelo sistema + notas manuais).
