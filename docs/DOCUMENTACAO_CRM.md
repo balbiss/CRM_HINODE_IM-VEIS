@@ -276,7 +276,7 @@ existe). Zero risco, zero efeito no resto do app — nunca configurar essas vari
   roleta "Geral", 10 leads, 6 imóveis, links úteis. **Só pra dev local — nunca rodar em produção.**
 - **Produção não usa o seed de demonstração.** Tem dado real, importado à parte da produção original
   (CRM OKA): 12 perfis reais da equipe Hinode + os leads reais (preservando corretor/coluna/campanha
-  de origem). Ver `server/src/db/import-oka-leads.ts` (script pontual, token via env, nunca commitado
+  de origem). Ver `server/src/db/importar-oka.ts` (migração completa v1→v2, idempotente por `oka_id`, token via env, nunca commitado
   com segredo) e `docs/INSTALACAO.md` §5.
 
 ## 16. Gotchas (para não repetir)

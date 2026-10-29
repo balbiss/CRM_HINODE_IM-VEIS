@@ -316,6 +316,20 @@
       "when": 1791931820706,
       "tag": "0044_futuristic_mojo",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793238305400,
+      "tag": "0045_sweet_pandemic",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793238428389,
+      "tag": "0046_huge_juggernaut",
+      "breakpoints": true
     }
   ]
 }

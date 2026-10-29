@@ -143,6 +143,15 @@ export const perfis = pgTable('perfis', {
   telefone: text('telefone'),
   bloqueado: boolean('bloqueado').notNull().default(false),
   emPlantao: boolean('em_plantao').notNull().default(false),
+  // --- Regras herdadas do CRM OKA (v1) ---
+  okaId: uuid('oka_id'),
+  avatarUrl: text('avatar_url'),
+  emAlmoco: boolean('em_almoco').notNull().default(false),
+  advertenciasSemana: integer('advertencias_semana').notNull().default(0),
+  advertenciaSemanaInicio: date('advertencia_semana_inicio', { mode: 'string' }),
+  ultimoLeadRecebidoEm: timestamp('ultimo_lead_recebido_em', { withTimezone: true }),
+  // "Remover da equipe" (só dono): perde o acesso e some das listas, mas o nome fica no histórico.
+  removidoEm: timestamp('removido_em', { withTimezone: true }),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   imobiliariaIdx: index('perfis_imobiliaria_id_idx').on(table.imobiliariaId),
@@ -208,8 +217,56 @@ export const leads = pgTable('leads', {
   // Kanban, da roleta automática e do "distribuir pendentes" — só o dono/gerente distribui.
   loteImportacaoId: uuid('lote_importacao_id').references(() => lotesImportacao.id, { onDelete: 'set null' }),
   importacaoPendente: boolean('importacao_pendente').notNull().default(false),
+  // --- Regras herdadas do CRM OKA (v1) ---
+  // id do lead no CRM OKA (Supabase) — deixa a importação idempotente e rastreável.
+  okaId: uuid('oka_id'),
+  temperatura: text('temperatura'), // 'quente' | 'morno' | 'frio'
+  telefoneAlternativo: text('telefone_alternativo'),
+  bairroInteresse: text('bairro_interesse'),
+  tipoImovelInteresse: text('tipo_imovel_interesse'),
+  referencia: text('referencia'),
+  linkDrive: text('link_drive'),
+  saldoFgts: numeric('saldo_fgts', { precision: 14, scale: 2 }),
+  valorEntrada: numeric('valor_entrada', { precision: 14, scale: 2 }),
+  dataNascimento: date('data_nascimento', { mode: 'string' }),
+  // ano em que o lembrete de aniversário já foi mandado (não repete no mesmo ano)
+  lembreteAniversarioAno: integer('lembrete_aniversario_ano'),
+  lembretePosVendaEm: timestamp('lembrete_pos_venda_em', { withTimezone: true }),
+  // Cadência de chamada numérica da v1: 0 = Início … 5 = Chamada 5.
+  cadenciaChamada: integer('cadencia_chamada').notNull().default(0),
+  dataUltimaChamada: timestamp('data_ultima_chamada', { withTimezone: true }),
+  // Próximo contato marcado (na v1: lembrete_follow_up). Todo lead com corretor tem um.
+  proximoContatoEm: timestamp('proximo_contato_em', { withTimezone: true }),
+  tentativasContato: integer('tentativas_contato').notNull().default(0),
+  // Visita / FID / compromisso do lead
+  dataVisita: timestamp('data_visita', { withTimezone: true }),
+  tipoVisita: text('tipo_visita'),
+  statusVisita: text('status_visita'),
+  // Descarte: normal grava descartadoEm na hora; extremo fica pendente até aprovação.
+  descartadoEm: timestamp('descartado_em', { withTimezone: true }),
+  descartadoPor: uuid('descartado_por'),
+  descartePendenteAprovacao: boolean('descarte_pendente_aprovacao').notNull().default(false),
+  // Venda: só vai pra coluna VENDA depois de registrada e aprovada.
+  vendaPendenteAprovacao: boolean('venda_pendente_aprovacao').notNull().default(false),
+  valorVenda: numeric('valor_venda', { precision: 14, scale: 2 }),
+  dataFechamento: timestamp('data_fechamento', { withTimezone: true }),
+  dataVendaInformada: date('data_venda_informada', { mode: 'string' }),
+  empreendimento: text('empreendimento'),
+  torre: text('torre'),
+  unidade: text('unidade'),
+  // "Visto" da gestão na Análise de Crédito (null = alerta vermelho aceso).
+  creditoAprovadoEm: timestamp('credito_aprovado_em', { withTimezone: true }),
+  primeiroContatoEm: timestamp('primeiro_contato_em', { withTimezone: true }),
+  dataAtribuicao: timestamp('data_atribuicao', { withTimezone: true }),
+  ultimaAcaoEm: timestamp('ultima_acao_em', { withTimezone: true }),
+  slaVencido: boolean('sla_vencido').notNull().default(false),
+  favorito: boolean('favorito').notNull().default(false),
+  conversaFixada: boolean('conversa_fixada').notNull().default(false),
+  recadastroEm: timestamp('recadastro_em', { withTimezone: true }),
+  recadastroOrigem: text('recadastro_origem'),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
+  okaIdx: uniqueIndex('leads_oka_id_uq').on(table.okaId).where(sql`${table.okaId} is not null`),
   // Postgres não indexa FK automaticamente — sem isso, toda listagem de leads (a query mais
   // comum do app) fazia sequential scan na tabela inteira (ficou visível só depois que a tabela
   // passou a ter 10k+ linhas reais, nunca doeu com o seed de demonstração de 10 linhas).
@@ -367,6 +424,8 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   // Áudio do cliente transcrito (feito quando o Agente de IA está atendendo) — a IA lê e o corretor também.
   transcricao: text('transcricao'),
   canal: mensagemCanalEnum('canal').notNull().default('corretor'),
+  // id da mensagem no CRM OKA (v1) — importação idempotente
+  okaId: uuid('oka_id').unique(),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   leadIdx: index('mensagens_lead_id_idx').on(table.leadId),
@@ -388,6 +447,7 @@ export const tarefas = pgTable('tarefas', {
   concluidaEm: timestamp('concluida_em', { withTimezone: true }),
   // vira true quando a varredura já avisou o corretor que a tarefa venceu (não avisa de novo).
   avisada: boolean('avisada').notNull().default(false),
+  okaId: uuid('oka_id').unique(),
   criadoPor: uuid('criado_por').references(() => perfis.id, { onDelete: 'set null' }),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
@@ -474,6 +534,7 @@ export const eventosLead = pgTable('eventos_lead', {
   tipo: text('tipo').notNull(),
   descricao: text('descricao').notNull(),
   atorNome: text('ator_nome'),
+  okaId: uuid('oka_id').unique(),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   leadIdx: index('eventos_lead_lead_id_idx').on(table.leadId),
@@ -643,9 +704,71 @@ export const notificacoes = pgTable('notificacoes', {
   tipo: text('tipo').notNull(),
   titulo: text('titulo').notNull(),
   texto: text('texto'),
+  // lead da notificação (clicar abre o card) — avisos de crédito/aniversário/pós-venda dependem disso
+  leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
   lida: boolean('lida').notNull().default(false),
   criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
-});
+}, table => ({
+  perfilIdx: index('notificacoes_perfil_id_idx').on(table.perfilId),
+}));
+
+/** Cada descarte de lead (normal ou extremo), com quem pediu, motivo e observação. */
+export const descartesLeads = pgTable('descartes_leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  leadId: uuid('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  usuarioId: uuid('usuario_id').references(() => perfis.id, { onDelete: 'set null' }),
+  motivo: text('motivo').notNull(),
+  observacao: text('observacao'),
+  okaId: uuid('oka_id').unique(),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  leadIdx: index('descartes_leads_lead_id_idx').on(table.leadId),
+}));
+
+/** Compromisso da equipe (reunião, treinamento) — aparece pra todo mundo, aviso 1h antes. */
+export const compromissosEquipe = pgTable('compromissos_equipe', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  titulo: text('titulo').notNull(),
+  tipo: text('tipo').notNull().default('reuniao'),
+  inicio: timestamp('inicio', { withTimezone: true }).notNull(),
+  fim: timestamp('fim', { withTimezone: true }),
+  local: text('local'),
+  observacao: text('observacao'),
+  criadoPor: uuid('criado_por').references(() => perfis.id, { onDelete: 'set null' }),
+  canceladoEm: timestamp('cancelado_em', { withTimezone: true }),
+  avisoEnviadoEm: timestamp('aviso_enviado_em', { withTimezone: true }),
+  okaId: uuid('oka_id').unique(),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('compromissos_equipe_imobiliaria_id_idx').on(table.imobiliariaId),
+}));
+
+/** Campanha de anúncio (o nome que vem no lead) com o link do criativo no Drive. */
+export const campanhas = pgTable('campanhas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  nome: text('nome').notNull(),
+  driveUrl: text('drive_url'),
+  observacao: text('observacao'),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  nomeIdx: uniqueIndex('campanhas_imobiliaria_nome_uq').on(table.imobiliariaId, table.nome),
+}));
+
+/** Quanto foi gasto em cada campanha por mês (YYYY-MM) — base do CAC e do custo por lead. */
+export const gastosCampanha = pgTable('gastos_campanha', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  origem: text('origem').notNull(),
+  mes: text('mes').notNull(),
+  valor: numeric('valor', { precision: 14, scale: 2 }).notNull().default('0'),
+  atualizadoPor: uuid('atualizado_por').references(() => perfis.id, { onDelete: 'set null' }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  origemMesIdx: uniqueIndex('gastos_campanha_origem_mes_uq').on(table.imobiliariaId, table.origem, table.mes),
+}));
 
 /** Cada vez que um corretor recusa um lead no popup do CRM (ou deixa o tempo acabar).
  *  Alimenta o Histórico da Roleta e as métricas de aceite em Relatórios. */
