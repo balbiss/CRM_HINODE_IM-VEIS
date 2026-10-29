@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
+import { MensagensProntas } from '../components/MensagensProntas';
 import { TagChips } from '../components/CardTagBar';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -104,14 +105,6 @@ export default function Conversas() {
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   };
   useEffect(paraOFim, [convThread.length, convId, convTyping]);
-  const slashQ = (convDraft || '').startsWith('/') ? convDraft.slice(1).toLowerCase() : null;
-  const SLASH_ITEMS: [string, string][] = [
-    ['/tabela', 'Acabei de te enviar a tabela de valores atualizada. Qualquer dúvida, me chama.'],
-    ['/visita', 'Passando para confirmar nossa visita — consegue no horário combinado?'],
-    ['/docs', 'Para adiantar a análise, me envia RG, CPF e comprovante de renda?'],
-    ['/proposta', 'Montei uma proposta com a condição de entrada desta semana. Posso te ligar para explicar?'],
-  ];
-  const slashItems = SLASH_ITEMS.filter(([cmd]) => slashQ === null || cmd.slice(1).startsWith(slashQ));
 
   return (
     <div className="conv-fullbleed">
@@ -264,17 +257,7 @@ export default function Conversas() {
               </div>
               <div style={{ borderTop: '1px solid var(--line)', padding: '14px 18px', position: 'relative', background: 'var(--card)', flex: 'none' }}>
                 <AvisoJanelaOficial leadId={CL.id} qtdMensagens={convThread.length} />
-                {slashQ !== null && slashItems.length > 0 && (
-                  <div style={{ position: 'absolute', left: 18, right: 18, bottom: 64, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 6, boxShadow: '0 12px 28px rgba(28,27,26,.14)' }}>
-                    <p style={{ fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '6px 10px 8px' }}>Templates rápidos</p>
-                    {slashItems.map(([cmd, label]) => (
-                      <button key={cmd} onClick={() => setConvDraft(label)} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13, display: 'flex', gap: 10 }}>
-                        <span style={{ color: 'var(--terra)', fontWeight: 700, fontSize: 12.5 }}>{cmd}</span>
-                        <span style={{ flex: 1, minWidth: 0, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <MensagensProntas draft={convDraft || ''} setDraft={setConvDraft} leadId={CL.id} leadNome={CL.nome} />
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     ref={fileInputRef}
@@ -316,7 +299,7 @@ export default function Conversas() {
                       }
                     }}
                   />
-                  <input value={convDraft} onChange={e => setConvDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendConv()} placeholder="Mensagem · digite / para templates" style={{ flex: 1, minWidth: 0, padding: '11px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                  <input value={convDraft} onChange={e => setConvDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendConv()} placeholder="Mensagem · digite / pras mensagens prontas" style={{ flex: 1, minWidth: 0, padding: '11px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
                   <button onClick={sendConv} style={{ padding: '11px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, flex: 'none' }}>Enviar</button>
                 </div>
               </div>

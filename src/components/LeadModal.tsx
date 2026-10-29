@@ -14,6 +14,7 @@ import { AudioRecordButton } from './AudioRecordButton';
 import { EmojiPicker } from './EmojiPicker';
 import { AvisoJanelaOficial } from './WhatsappOficial';
 import { LeadDetalhesOka } from './LeadDetalhesOka';
+import { MensagensProntas } from './MensagensProntas';
 
 const TABS: Array<[string, string]> = [
   ['detalhes', 'Detalhes'], ['chat', 'Chat WhatsApp'], ['followup', 'Follow-up'], ['historico', 'Histórico'],
@@ -97,11 +98,7 @@ export function LeadModal() {
   }
 
 
-  const quickTemplates = [
-    { label: 'Enviar tabela de valores', texto: 'Acabei de te enviar a tabela de valores atualizada. Qualquer dúvida, me chama.' },
-    { label: 'Confirmar visita', texto: 'Passando para confirmar nossa visita — consegue no horário combinado?' },
-    { label: 'Pedir documentos', texto: 'Para adiantar a análise, me envia RG, CPF e comprovante de renda?' },
-  ];
+  const [prontasAbertas, setProntasAbertas] = useState(false);
 
   return (
     <div onClick={closeLead} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
@@ -226,10 +223,12 @@ export function LeadModal() {
                 
               </div>
               <AvisoJanelaOficial leadId={L.id} qtdMensagens={chatMsgs.length} />
+              <div style={{ position: 'relative' }}>
+                <MensagensProntas draft={draft} setDraft={setDraft} leadId={L.id} leadNome={L.nome} aberto={prontasAbertas} onFechar={() => setProntasAbertas(false)} bottom={8} />
+              </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                {quickTemplates.map(q => (
-                  <button key={q.label} onClick={() => setDraft(q.texto)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>{q.label}</button>
-                ))}
+                <button onClick={() => setProntasAbertas(v => !v)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>Mensagens prontas</button>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>ou digite / no campo</span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
@@ -272,7 +271,7 @@ export function LeadModal() {
                     }
                   }}
                 />
-                <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} placeholder="Escreva uma mensagem…" style={{ flex: 1, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} placeholder="Escreva uma mensagem… (/ = mensagens prontas)" style={{ flex: 1, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
                 <button onClick={sendMsg} style={{ padding: '12px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Enviar</button>
               </div>
             </>

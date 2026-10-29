@@ -7,7 +7,8 @@ export default function Templates() {
   const newTpl = useAppStore(s => s.newTpl);
   const updateTpl = useAppStore(s => s.updateTpl);
   const delTpl = useAppStore(s => s.delTpl);
-  const toast = useAppStore(s => s.toast);
+  const me = useAppStore(s => s.me);
+  const podeEditar = (t: RemoteTemplate) => !t.criadoPor || t.criadoPor === me?.id || me?.role === 'dono' || me?.role === 'gerente';
   const [editando, setEditando] = useState<RemoteTemplate | null>(null);
 
   return (
@@ -22,7 +23,8 @@ export default function Templates() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
         {templates.map(t => (
           <div key={t.id} style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', padding: 20 }}>
-            <p style={{ fontSize: 14.5, fontWeight: 700, margin: '0 0 8px' }}>{t.titulo}</p>
+            <p style={{ fontSize: 14.5, fontWeight: 700, margin: '0 0 2px' }}>{t.titulo}</p>
+            <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 8px' }}>{t.criadoPor === me?.id ? 'Sua' : 'de ' + (t.autorNome || 'outro corretor')}{t.anexos && t.anexos.length > 1 ? ' · ' + t.anexos.length + ' anexos' : ''}</p>
             <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--muted)', margin: '0 0 14px' }}>{t.texto}</p>
             {t.anexoUrl && (
               <a href={t.anexoUrl} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 14, fontSize: 12, color: 'var(--ink)' }}>
@@ -31,15 +33,14 @@ export default function Templates() {
               </a>
             )}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button onClick={() => toast('Template "' + t.titulo + '" pronto para usar no chat')} style={{ flex: 1, padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12, fontWeight: 600 }}>Usar no chat</button>
-              <button onClick={() => setEditando(t)} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12 }}>Editar</button>
-              <button onClick={() => delTpl(t.id)} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12, color: 'var(--terra)' }}>Excluir</button>
+              {podeEditar(t) && <button onClick={() => setEditando(t)} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12 }}>Editar</button>}
+              {podeEditar(t) && <button onClick={() => delTpl(t.id)} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12, color: 'var(--terra)' }}>Excluir</button>}
             </div>
           </div>
         ))}
       </div>
       {templates.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nenhum template ainda — clique em "Novo template" pra criar o primeiro.</p>}
-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '18px 0 0' }}>Variáveis disponíveis: {'{nome}'}, {'{corretor}'}, {'{imovel}'} · cada corretor vê apenas os próprios templates.</p>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '18px 0 0' }}>No chat (Conversas ou card do lead), digite <strong>/</strong> pra abrir as mensagens prontas e filtre pelo título. {'{nome}'} vira o primeiro nome do cliente. Todo mundo da imobiliária usa as de todos; cada um edita as suas (dono e gerente editam todas).</p>
 
       {editando && (
         <EditModal

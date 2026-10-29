@@ -29,7 +29,7 @@ export interface RemoteRoleta {
   canais: string[]; finalidade: RoletaFinalidade; sessaoWhatsappId: string | null; ultimoCorretorId?: string | null; numeroPrimeiroContatoId?: string | null;
   membros: RoletaMembro[];
 }
-export interface RemoteTemplate { id: string; titulo: string; texto: string; anexoUrl: string | null }
+export interface RemoteTemplate { id: string; titulo: string; texto: string; anexoUrl: string | null; anexos?: { url: string; nome?: string; tipo?: string }[]; criadoPor?: string; autorNome?: string | null }
 export type SituacaoImovel = 'Pronto para morar' | 'Em obras' | 'Lançamento';
 export interface RemoteImovel {
   id: string; tipo: string; finalidade: string; titulo: string;
