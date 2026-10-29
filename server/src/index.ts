@@ -5,6 +5,7 @@ import http from 'node:http';
 import { Server } from 'socket.io';
 import { authRouter } from './routes/auth.js';
 import { leadsRouter } from './routes/leads.js';
+import { aprovacoesRouter } from './routes/aprovacoes.js';
 import { colunasRouter } from './routes/colunas.js';
 import { filasRouter } from './routes/filas.js';
 import { perfisRouter } from './routes/perfis.js';
@@ -88,6 +89,7 @@ io.on('connection', socket => {
 app.use('/api/config', configRouter(io));
 app.use('/api/colunas', colunasRouter(io));
 app.use('/api/leads', leadsRouter(io));
+app.use('/api/aprovacoes', aprovacoesRouter(io));
 app.use('/api/filas', filasRouter(io));
 app.use('/api/roletas', roletasRouter(io));
 app.use('/api/perfis', perfisRouter(io));

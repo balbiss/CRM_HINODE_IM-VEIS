@@ -2,9 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, recusasLead, imobiliarias, notificacoes, imoveis } from '../db/schema.js';
+import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, recusasLead, imobiliarias, notificacoes, imoveis, descartesLeads } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { distribuirLead } from '../lib/roleta.js';
+import {
+  FUSO, MOTIVOS_DESCARTE_EXTREMO, MOTIVOS_DESCARTE_OBS_OBRIGATORIA, SLUGS_EXIGEM_AGENDAMENTO, SLUGS_EXIGEM_PROXIMO_CONTATO,
+  calcularProximaCadencia, colunaPorSlug, distribuirLeads, hojeSp, vendaFechada,
+} from '../lib/regrasOka.js';
+import { inArray } from 'drizzle-orm';
 import { registrarEvento } from '../lib/eventos.js';
 import { dispararGatilhoLeadNovo, encerrarPorLead } from '../lib/followup.js';
 import { desc } from 'drizzle-orm';
@@ -77,32 +82,224 @@ export function leadsRouter(io: SocketServer) {
     if (row.corretorId) void dispararGatilhoLeadNovo(io, imobiliariaId, row.id, row.corretorId);
   });
 
-  const moveSchema = z.object({ colunaId: z.string().uuid() });
+  // Mover de coluna com as travas da v1: venda fechada/pendente não mexe, VENDA só pelo registro de
+  // venda, Agendado/FID exige o compromisso marcado e as colunas de acompanhamento exigem um
+  // próximo contato no futuro — o front manda a data junto (proximoContatoEm / dataVisita).
+  const moveSchema = z.object({
+    colunaId: z.string().uuid(),
+    proximoContatoEm: z.string().datetime({ offset: true }).optional(),
+    dataVisita: z.string().datetime({ offset: true }).optional(),
+    tipoVisita: z.enum(['VISITA', 'FID']).optional(),
+  });
 
   router.patch('/:id/mover', async (req, res) => {
     const parsed = moveSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'colunaId inválido' });
     const { imobiliariaId, role, sub, nome } = req.auth!;
+    const { colunaId, proximoContatoEm, dataVisita, tipoVisita } = parsed.data;
 
     const scoped = role === 'corretor'
       ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
       : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
 
-    const [antes] = await db.select({ colunaId: leads.colunaId }).from(leads).where(scoped).limit(1);
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    const [col] = await db.select({ titulo: colunasKanban.titulo, slug: colunasKanban.slug }).from(colunasKanban)
+      .where(and(eq(colunasKanban.id, colunaId), eq(colunasKanban.imobiliariaId, imobiliariaId))).limit(1);
+    if (!col) return res.status(400).json({ error: 'Coluna não encontrada' });
+    if (antes.colunaId === colunaId) return res.json(antes);
+
+    if (vendaFechada(antes)) return res.status(409).json({ error: 'Negócio já fechado — não dá pra mudar a coluna.', motivo: 'venda_fechada' });
+    if (antes.vendaPendenteAprovacao) return res.status(409).json({ error: 'Venda aguardando aprovação — não dá pra mudar a coluna agora.', motivo: 'venda_pendente' });
+    if (col.slug === 'venda') {
+      return res.status(409).json({ error: 'Pra levar o card pra VENDA, registre a venda (valor e empreendimento) — ela vai pra aprovação.', motivo: 'registrar_venda' });
+    }
+    const agora = Date.now();
+    const extra: Partial<typeof leads.$inferInsert> = {};
+    if (col.slug && SLUGS_EXIGEM_AGENDAMENTO.includes(col.slug)) {
+      const visita = dataVisita ? new Date(dataVisita) : antes.dataVisita;
+      if (!visita || +visita <= agora) {
+        return res.status(409).json({ error: '"' + col.titulo + '" exige a data e o horário do compromisso.', motivo: 'agendamento' });
+      }
+      if (dataVisita) Object.assign(extra, { dataVisita: visita, tipoVisita: tipoVisita ?? (col.slug === 'fid' ? 'FID' : 'VISITA'), statusVisita: 'AGENDADA' });
+    } else if (col.slug && SLUGS_EXIGEM_PROXIMO_CONTATO.includes(col.slug)) {
+      const prox = proximoContatoEm ? new Date(proximoContatoEm) : antes.proximoContatoEm;
+      if (!prox || +prox <= agora) {
+        return res.status(409).json({ error: 'Marque a data e o horário do próximo contato.', motivo: 'proximo_contato' });
+      }
+      if (proximoContatoEm) extra.proximoContatoEm = prox;
+    } else if (proximoContatoEm) {
+      extra.proximoContatoEm = new Date(proximoContatoEm);
+    }
+
     const [row] = await db.update(leads)
-      .set({ colunaId: parsed.data.colunaId, entrouNaColunaEm: new Date() })
+      .set({ colunaId, entrouNaColunaEm: new Date(), ultimaAcaoEm: new Date(), ...extra })
       .where(scoped)
       .returning();
     if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
-    if (antes?.colunaId !== parsed.data.colunaId) {
-      const [col] = await db.select({ titulo: colunasKanban.titulo, slug: colunasKanban.slug }).from(colunasKanban)
-        .where(eq(colunasKanban.id, parsed.data.colunaId)).limit(1);
-      registrarEvento(imobiliariaId, row.id, 'coluna', 'Movido para "' + (col?.titulo ?? 'outra etapa') + '"', nome);
-      // fechou negócio ou saiu do funil → não faz sentido continuar a régua de follow-up
-      if (col?.slug === 'venda' || col?.slug === 'rebatida') void encerrarPorLead(io, imobiliariaId, row.id, 'lead saiu do funil (' + col.slug + ')');
+    registrarEvento(imobiliariaId, row.id, 'coluna', 'Movido para "' + col.titulo + '"'
+      + (extra.proximoContatoEm ? ' e agendou o próximo contato' : extra.dataVisita ? ' e marcou ' + (extra.tipoVisita ?? 'o compromisso') : ''), nome);
+    // tirou do robô (coluna FOLLOW-UP AUTOMÁTICO) ou saiu do funil → para o follow-up
+    const [colAntes] = antes.colunaId
+      ? await db.select({ slug: colunasKanban.slug }).from(colunasKanban).where(eq(colunasKanban.id, antes.colunaId)).limit(1)
+      : [];
+    if (colAntes?.slug === 'followup_auto' || col.slug === 'rebatida') {
+      void encerrarPorLead(io, imobiliariaId, row.id, colAntes?.slug === 'followup_auto' ? 'corretor tirou o card da coluna FOLLOW-UP AUTOMÁTICO' : 'lead saiu do funil');
     }
     io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
     res.json(row);
+  });
+
+  // Registrar uma chamada da cadência (Início → Chamada 5). Já agenda o próximo contato no
+  // horário fixo (17h ou 11h do próximo dia útil) e manda o card pra TAREFAS.
+  router.post('/:id/cadencia', async (req, res) => {
+    const parsed = z.object({ cadencia: z.number().int().min(0).max(5) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Cadência inválida' });
+    const { imobiliariaId, role, sub, nome } = req.auth!;
+    const scoped = role === 'corretor'
+      ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    const agora = new Date();
+    const proximo = calcularProximaCadencia(agora);
+    const set: Partial<typeof leads.$inferInsert> = {
+      cadenciaChamada: parsed.data.cadencia, cadencia: parsed.data.cadencia ? 'Chamada ' + parsed.data.cadencia : 'Início',
+      dataUltimaChamada: agora, proximoContatoEm: proximo, ultimaAcaoEm: agora,
+    };
+    let saiuDoRobo = false;
+    if (!vendaFechada(antes) && !antes.descartadoEm && !antes.vendaPendenteAprovacao) {
+      const tarefasCol = await colunaPorSlug(imobiliariaId, 'atend');
+      if (tarefasCol && antes.colunaId !== tarefasCol.id) {
+        const [colAntes] = antes.colunaId ? await db.select({ slug: colunasKanban.slug }).from(colunasKanban).where(eq(colunasKanban.id, antes.colunaId)).limit(1) : [];
+        saiuDoRobo = colAntes?.slug === 'followup_auto';
+        Object.assign(set, { colunaId: tarefasCol.id, entrouNaColunaEm: agora });
+      }
+    }
+    const [row] = await db.update(leads).set(set).where(scoped).returning();
+    registrarEvento(imobiliariaId, row.id, 'cadencia', 'Cadência de chamada: ' + (parsed.data.cadencia ? 'Chamada ' + parsed.data.cadencia : 'Início')
+      + ' · próximo contato ' + proximo.toLocaleString('pt-BR', { timeZone: FUSO, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), nome);
+    if (saiuDoRobo) void encerrarPorLead(io, imobiliariaId, row.id, 'corretor mudou a cadência de chamada');
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // Descartar / devolver ao bolsão. Motivo extremo (Descadastrar, Já Comprou, Contato Errado...)
+  // não descarta na hora: some do Kanban do corretor e espera a aprovação do dono/gerente.
+  router.post('/:id/descartar', async (req, res) => {
+    const parsed = z.object({ motivo: z.string().min(1).max(120), observacao: z.string().max(1000).optional() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Escolha o motivo' });
+    const { motivo } = parsed.data;
+    const observacao = parsed.data.observacao?.trim() || null;
+    if (MOTIVOS_DESCARTE_OBS_OBRIGATORIA.includes(motivo) && !observacao) {
+      return res.status(400).json({ error: 'Esse motivo exige uma observação.' });
+    }
+    const { imobiliariaId, role, sub, nome } = req.auth!;
+    const scoped = role === 'corretor'
+      ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    if (vendaFechada(antes) || antes.vendaPendenteAprovacao) return res.status(409).json({ error: 'Lead com venda registrada não pode ser descartado.' });
+
+    await db.insert(descartesLeads).values({ imobiliariaId, leadId: antes.id, usuarioId: sub, motivo, observacao });
+    const agora = new Date();
+    let row;
+    if (MOTIVOS_DESCARTE_EXTREMO.includes(motivo)) {
+      [row] = await db.update(leads).set({ descartePendenteAprovacao: true, motivoDescarte: motivo, ultimaAcaoEm: agora })
+        .where(eq(leads.id, antes.id)).returning();
+      registrarEvento(imobiliariaId, antes.id, 'descarte', 'Pediu descarte (aguarda aprovação): ' + motivo + (observacao ? ' — ' + observacao : ''), nome);
+      const gestores = await db.select({ id: perfis.id }).from(perfis)
+        .where(and(eq(perfis.imobiliariaId, imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
+      if (gestores.length) {
+        await db.insert(notificacoes).values(gestores.map(g => ({
+          perfilId: g.id, leadId: antes.id, tipo: 'aprovacao_descarte', titulo: 'Descarte pra aprovar: ' + antes.nome, texto: motivo + ' · pedido por ' + nome,
+        })));
+      }
+    } else {
+      // vai pro bolsão sem corretor, sem próximo contato nem visita (não fica preso em Tarefas)
+      const rebatida = await colunaPorSlug(imobiliariaId, 'rebatida');
+      [row] = await db.update(leads).set({
+        corretorId: null, colunaId: rebatida?.id ?? antes.colunaId, motivoDescarte: motivo, descartadoPor: sub, descartadoEm: agora,
+        proximoContatoEm: null, dataVisita: null, statusVisita: null, ultimaAcaoEm: agora, entrouNaColunaEm: agora,
+        ...(antes.iaStatus === 'atendendo' ? { iaStatus: 'pausado' as const, iaAguardandoDesde: null } : {}),
+      }).where(eq(leads.id, antes.id)).returning();
+      registrarEvento(imobiliariaId, antes.id, 'descarte', 'Lead devolvido: ' + motivo + (observacao ? ' — ' + observacao : ''), nome);
+    }
+    void encerrarPorLead(io, imobiliariaId, antes.id, 'lead descartado');
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // Registrar venda: NÃO fecha na hora — vai pra aprovação do dono/gerente (coluna não muda aqui).
+  router.post('/:id/venda', async (req, res) => {
+    const parsed = z.object({
+      valor: z.number().positive(), dataVenda: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      empreendimento: z.string().max(200).optional(), unidade: z.string().max(60).optional(), torre: z.string().max(60).optional(),
+      observacao: z.string().max(1000).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Informe o valor e a data da venda.' });
+    const d = parsed.data;
+    if (d.dataVenda > hojeSp()) return res.status(400).json({ error: 'A data da venda não pode ser no futuro.' });
+    const { imobiliariaId, role, sub, nome } = req.auth!;
+    const scoped = role === 'corretor'
+      ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    if (vendaFechada(antes)) return res.status(409).json({ error: 'Esse lead já tem venda aprovada.' });
+    const [row] = await db.update(leads).set({
+      vendaPendenteAprovacao: true, valorVenda: String(d.valor), empreendimento: d.empreendimento || null,
+      unidade: d.unidade || null, torre: d.torre || null, dataVendaInformada: d.dataVenda, ultimaAcaoEm: new Date(),
+    }).where(eq(leads.id, antes.id)).returning();
+    const dataBr = d.dataVenda.split('-').reverse().join('/');
+    registrarEvento(imobiliariaId, antes.id, 'venda', `Venda enviada pra aprovação · data ${dataBr} · ${d.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+      + ` · ${d.empreendimento || '-'} · unidade ${d.unidade || '-'} · torre ${d.torre || '-'}` + (d.observacao ? ' · ' + d.observacao : ''), nome);
+    const gestores = await db.select({ id: perfis.id }).from(perfis)
+      .where(and(eq(perfis.imobiliariaId, imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
+    if (gestores.length) {
+      await db.insert(notificacoes).values(gestores.map(g => ({
+        perfilId: g.id, leadId: antes.id, tipo: 'aprovacao_venda', titulo: 'Venda pra aprovar: ' + antes.nome, texto: 'Registrada por ' + nome,
+      })));
+    }
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // Tirar o compromisso (visita/FID) marcado sem querer — some do card e da agenda.
+  router.post('/:id/remover-compromisso', async (req, res) => {
+    const { imobiliariaId, role, sub, nome } = req.auth!;
+    const scoped = role === 'corretor'
+      ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    const [row] = await db.update(leads).set({ dataVisita: null, statusVisita: null, ultimaAcaoEm: new Date() }).where(eq(leads.id, antes.id)).returning();
+    if (antes.dataVisita) {
+      registrarEvento(imobiliariaId, antes.id, 'visita', 'Compromisso (' + (antes.tipoVisita || 'VISITA') + ') de '
+        + antes.dataVisita.toLocaleString('pt-BR', { timeZone: FUSO, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' removido do card', nome);
+    }
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // Transferir (um ou vários) leads pra um corretor — só dono/gerente. Avisa o corretor.
+  router.post('/transferir', requireRole('dono', 'gerente'), async (req, res) => {
+    const parsed = z.object({ leadIds: z.array(z.string().uuid()).min(1).max(500), corretorId: z.string().uuid() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Escolha os leads e o corretor' });
+    const { imobiliariaId, nome } = req.auth!;
+    const [corretor] = await db.select({ id: perfis.id, nome: perfis.nome }).from(perfis)
+      .where(and(eq(perfis.id, parsed.data.corretorId), eq(perfis.imobiliariaId, imobiliariaId), eq(perfis.bloqueado, false))).limit(1);
+    if (!corretor) return res.status(404).json({ error: 'Corretor não encontrado' });
+    const rows = await distribuirLeads(imobiliariaId, parsed.data.leadIds, corretor.id, 'manual');
+    for (const r of rows) {
+      registrarEvento(imobiliariaId, r.id, 'atribuicao', 'Transferido para ' + corretor.nome, nome);
+      io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', r);
+      // a régua do corretor antigo para antes de a do novo (fluxo Geral) começar
+      void encerrarPorLead(io, imobiliariaId, r.id, 'lead passou pra outro corretor')
+        .then(() => dispararGatilhoLeadNovo(io, imobiliariaId, r.id, corretor.id));
+    }
+    res.json({ ok: true, total: rows.length });
   });
 
   const updateSchema = z.object({
@@ -114,7 +311,32 @@ export function leadsRouter(io: SocketServer) {
     cadencia: z.string().nullable().optional(),
     finalidade: z.enum(['venda', 'locacao']).nullable().optional(),
     rendaDeclarada: z.number().optional(),
+    // campos do card da v1
+    temperatura: z.enum(['quente', 'morno', 'frio']).nullable().optional(),
+    telefoneAlternativo: z.string().max(40).nullable().optional(),
+    bairroInteresse: z.string().max(120).nullable().optional(),
+    tipoImovelInteresse: z.string().max(120).nullable().optional(),
+    referencia: z.string().max(200).nullable().optional(),
+    linkDrive: z.string().max(500).nullable().optional(),
+    saldoFgts: z.number().nullable().optional(),
+    valorEntrada: z.number().nullable().optional(),
+    dataNascimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    favorito: z.boolean().optional(),
+    proximoContatoEm: z.string().datetime({ offset: true }).nullable().optional(),
+    dataVisita: z.string().datetime({ offset: true }).optional(),
+    tipoVisita: z.enum(['VISITA', 'FID']).optional(),
+    statusVisita: z.enum(['AGENDADA', 'REALIZADA', 'DESMARCADA', 'REAGENDADA', 'FURO']).optional(),
   });
+  // Rótulos pro histórico automático (v1: toda mudança no card vira registro, sem o corretor anotar).
+  const ROTULOS: Record<string, string> = {
+    nome: 'Nome', telefone: 'Telefone', email: 'E-mail', temperatura: 'Temperatura', telefoneAlternativo: 'Telefone alternativo',
+    bairroInteresse: 'Bairro de interesse', tipoImovelInteresse: 'Tipo de imóvel', referencia: 'Referência', linkDrive: 'Link do Drive',
+    saldoFgts: 'Saldo FGTS', valorEntrada: 'Valor de entrada', rendaDeclarada: 'Renda familiar', dataNascimento: 'Data de nascimento',
+    proximoContatoEm: 'Próximo contato', dataVisita: 'Data do compromisso', tipoVisita: 'Tipo de compromisso', statusVisita: 'Status do compromisso',
+    favorito: 'Favorito',
+  };
+  const NUMERICOS = ['saldoFgts', 'valorEntrada'];
+  const DATAS = ['proximoContatoEm', 'dataVisita'];
 
   router.patch('/:id', async (req, res) => {
     const parsed = updateSchema.safeParse(req.body);
@@ -124,25 +346,46 @@ export function leadsRouter(io: SocketServer) {
       ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
       : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
 
-    const [antes] = await db.select({ corretorId: leads.corretorId, motivoDescarte: leads.motivoDescarte, iaStatus: leads.iaStatus })
-      .from(leads).where(scoped).limit(1);
+    const [antes] = await db.select().from(leads).where(scoped).limit(1);
+    if (!antes) return res.status(404).json({ error: 'Lead não encontrado' });
+    // corretor só troca o próprio lead de dono via "Transferir" (dono/gerente)
+    if (role === 'corretor' && parsed.data.corretorId !== undefined && parsed.data.corretorId !== antes.corretorId) {
+      return res.status(403).json({ error: 'Só dono ou gerente transferem lead.' });
+    }
     const { rendaDeclarada, ...rest } = parsed.data;
+    const conv: Record<string, unknown> = { ...rest };
+    for (const k of NUMERICOS) if (conv[k] != null) conv[k] = String(conv[k]);
+    for (const k of DATAS) if (typeof conv[k] === 'string') conv[k] = new Date(conv[k] as string);
+    if (conv.dataVisita && !conv.statusVisita) conv.statusVisita = 'AGENDADA';
     // Atribuir ou descartar na mão tira o lead das mãos do Agente de IA.
-    const tiraDaIa = antes?.iaStatus === 'atendendo' && (!!rest.corretorId || !!rest.motivoDescarte);
+    const tiraDaIa = antes.iaStatus === 'atendendo' && (!!rest.corretorId || !!rest.motivoDescarte);
     const [row] = await db.update(leads)
       .set({
-        ...rest,
+        ...conv,
         ...(rendaDeclarada != null ? { rendaDeclarada: rendaDeclarada.toString() } : {}),
         ...(tiraDaIa ? { iaStatus: 'pausado' as const, iaAguardandoDesde: null } : {}),
+        ultimaAcaoEm: new Date(),
       })
       .where(scoped)
       .returning();
     if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
+    const fmt = (k: string, v: unknown) => v == null || v === '' ? '—'
+      : v instanceof Date ? v.toLocaleString('pt-BR', { timeZone: FUSO, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : k === 'favorito' ? (v ? 'sim' : 'não') : String(v);
+    const mudancas = Object.keys(parsed.data).filter(k => ROTULOS[k])
+      .map(k => [k, (antes as any)[k], (row as any)[k]] as const)
+      .filter(([, a, d]) => String(a instanceof Date ? +a : a ?? '') !== String(d instanceof Date ? +d : d ?? ''))
+      .map(([k, , d]) => ROTULOS[k] + ': ' + fmt(k, d));
+    if (mudancas.length) registrarEvento(imobiliariaId, row.id, 'auto', 'Alterou ' + mudancas.join(' · '), nome);
     if (tiraDaIa) registrarEvento(imobiliariaId, row.id, 'ia', 'Agente de IA pausado: o lead foi ' + (rest.motivoDescarte ? 'descartado' : 'atribuído') + ' manualmente', nome);
     if (rest.corretorId !== undefined && rest.corretorId !== antes?.corretorId) {
       if (rest.corretorId) {
         const [c] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, rest.corretorId)).limit(1);
         registrarEvento(imobiliariaId, row.id, 'atribuicao', 'Atribuído a ' + (c?.nome ?? 'corretor'), nome);
+        // v1: todo lead que ganha corretor já nasce com próximo contato (tarefa pra hoje)
+        const agora = new Date();
+        await db.update(leads).set({ dataAtribuicao: agora, ...(row.proximoContatoEm ? {} : { proximoContatoEm: agora }) }).where(eq(leads.id, row.id));
+        Object.assign(row, { dataAtribuicao: agora, proximoContatoEm: row.proximoContatoEm ?? agora });
         void dispararGatilhoLeadNovo(io, imobiliariaId, row.id, rest.corretorId);
       } else {
         registrarEvento(imobiliariaId, row.id, 'atribuicao', 'Removido do corretor', nome);
