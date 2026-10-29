@@ -8,7 +8,7 @@ import { canalPill } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
 import { LeadAvatar } from '../components/LeadAvatar';
-import { foraDoKanban } from '../lib/remoteLeads';
+import { foraDoKanban, perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { Flame, Snowflake, Sun } from 'lucide-react';
 
 type ViewMode = 'kanban' | 'lista';
@@ -174,7 +174,7 @@ export default function Kanban() {
           <div className="kb-toolbar-row" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {isManager && (
               <select className="kb-corretor" value={kbCorretor} onChange={e => setKbCorretor(e.target.value)} style={{ padding: '9px 12px', border: '1px solid ' + (kbCorretor !== 'Todos os corretores' ? 'var(--terra)' : 'var(--line)'), borderRadius: 8, background: kbCorretor !== 'Todos os corretores' ? 'var(--terraSoft)' : 'var(--card)', color: kbCorretor !== 'Todos os corretores' ? 'var(--terra)' : 'var(--ink)', fontSize: 13 }}>
-                <option>Todos os corretores</option>{perfis.map(p => <option key={p.id}>{p.nome}</option>)}
+                <option>Todos os corretores</option>{perfis.filter(perfilAtivo).map(p => <option key={p.id} value={p.nome}>{nomeNaLista(p)}</option>)}
               </select>
             )}
             {allTags.length > 0 && (

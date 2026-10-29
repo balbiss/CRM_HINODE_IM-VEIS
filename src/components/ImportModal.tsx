@@ -1,3 +1,4 @@
+import { perfilAtivo } from '../lib/remoteLeads';
 import { useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -49,7 +50,7 @@ export function ImportModal() {
   const [importando, setImportando] = useState(false);
   const [resultado, setResultado] = useState<{ criados: number; ignorados: number } | null>(null);
 
-  const corretores = perfis.filter(p => p.role === 'corretor');
+  const corretores = perfis.filter(p => p.role === 'corretor' && perfilAtivo(p));
   const cabecalho = linhas[0] || [];
   const dados = temCabecalho ? linhas.slice(1) : linhas;
 

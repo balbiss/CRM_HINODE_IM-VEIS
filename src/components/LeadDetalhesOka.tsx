@@ -1,3 +1,4 @@
+import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useState } from 'react';
 import { Flame, Snowflake, Star, Sun } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
@@ -124,7 +125,7 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
               style={inputCss}
             >
               <option value="" disabled>{L.corretorId ? '—' : 'Sem corretor'}</option>
-              {perfis.filter(p => !p.bloqueado).map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+              {perfis.filter(perfilAtivo).map(p => <option key={p.id} value={p.id}>{nomeNaLista(p)}</option>)}
             </select>
           ) : (
             <div style={{ ...inputCss, color: 'var(--muted)' }}>{L.corretor || 'Sem corretor'}</div>

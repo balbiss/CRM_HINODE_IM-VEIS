@@ -36,7 +36,7 @@ export function perfisRouter(io: SocketServer) {
   router.get('/', async (req, res) => {
     const { imobiliariaId } = req.auth!;
     const rows = await db
-      .select({ id: perfis.id, nome: perfis.nome, email: perfis.email, role: perfis.role, telefone: perfis.telefone, bloqueado: perfis.bloqueado, emPlantao: perfis.emPlantao })
+      .select({ id: perfis.id, nome: perfis.nome, email: perfis.email, role: perfis.role, telefone: perfis.telefone, bloqueado: perfis.bloqueado, emPlantao: perfis.emPlantao, removidoEm: perfis.removidoEm })
       .from(perfis)
       .where(eq(perfis.imobiliariaId, imobiliariaId));
     const memb = await db.select({ corretorId: filasAtendimento.corretorId, roletaId: filasAtendimento.roletaId })

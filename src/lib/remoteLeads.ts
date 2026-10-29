@@ -1,7 +1,11 @@
 import { COLS, type ColId, type Lead } from './data';
 
 export interface RemoteColuna { id: string; titulo: string; ordem: number; cor: string | null; slug: string | null }
-export interface RemotePerfil { id: string; nome: string; email: string; role: string; telefone: string | null; bloqueado: boolean; emPlantao: boolean; roletaIds?: string[] }
+export interface RemotePerfil { id: string; nome: string; email: string; role: string; telefone: string | null; bloqueado: boolean; emPlantao: boolean; removidoEm?: string | null; roletaIds?: string[] }
+/** Quem ainda trabalha na imobiliária: desligado (bloqueado ou removido) some das listas de escolha. */
+export const perfilAtivo = (p: RemotePerfil) => !p.bloqueado && !p.removidoEm;
+/** Nome pra lista: o dono aparece como "Nome (Dono)" — o valor continua sendo o nome. */
+export const nomeNaLista = (p: RemotePerfil) => (p.role === 'dono' ? p.nome + ' (Dono)' : p.nome);
 export interface RemoteLead {
   id: string;
   nome: string;

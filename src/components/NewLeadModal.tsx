@@ -1,3 +1,4 @@
+import { perfilAtivo } from '../lib/remoteLeads';
 import { useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -36,7 +37,7 @@ export function NewLeadModal() {
     if (ok) reset();
   };
 
-  const corretores = perfis.filter(p => p.role === 'corretor');
+  const corretores = perfis.filter(p => p.role === 'corretor' && perfilAtivo(p));
 
   return (
     <div onClick={fechar} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>

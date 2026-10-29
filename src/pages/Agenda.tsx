@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore, type Compromisso } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { foraDoKanban } from '../lib/remoteLeads';
+import { foraDoKanban, perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { HORARIOS, hojeLocal, isoLocal } from '../components/ModaisRegrasOka';
 import type { Lead } from '../lib/data';
 
@@ -118,7 +118,7 @@ export default function Agenda() {
           {isManager && (
             <select value={filtroCorretor} onChange={e => setFiltroCorretor(e.target.value)} style={inp}>
               <option value="">Todos os corretores</option>
-              {perfis.filter(p => p.role !== 'dono').map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+              {perfis.filter(perfilAtivo).map(p => <option key={p.id} value={p.id}>{nomeNaLista(p)}</option>)}
             </select>
           )}
           <button onClick={() => setForm({ titulo: '', tipo: 'Reunião', data: hojeLocal(), hora: '', local: '', observacao: '' })} style={{ padding: '10px 16px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Novo compromisso</button>

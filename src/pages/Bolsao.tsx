@@ -1,3 +1,4 @@
+import { perfilAtivo } from '../lib/remoteLeads';
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -117,7 +118,7 @@ export default function Bolsao() {
 
   const lista: Lead[] = bTab === 'roletalog' ? [] : abas[bTab];
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const corretores = perfis.filter(p => !p.bloqueado && p.role !== 'dono');
+  const corretores = perfis.filter(p => perfilAtivo(p) && p.role !== 'dono');
   const logVisivel = soRecusas ? roletaLog.filter(r => r.tipo === 'recusa') : roletaLog;
   const ORIGEM: Record<string, string> = { roleta: 'Roleta automática', automatico: 'Roleta (5 min sem contato)', manual: 'Transferido', 'rebatida-puxada': 'Puxou do bolsão', importacao: 'Planilha' };
 

@@ -1,3 +1,4 @@
+import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
 import { MensagensProntas } from '../components/MensagensProntas';
@@ -119,7 +120,7 @@ export default function Conversas() {
             {isManager && (
               <select value={convCorretor} onChange={e => setConvCorretor(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13, boxSizing: 'border-box' }}>
                 <option>Todos os corretores</option>
-                {perfis.map(p => <option key={p.id}>{p.nome}</option>)}
+                {perfis.filter(perfilAtivo).map(p => <option key={p.id} value={p.nome}>{nomeNaLista(p)}</option>)}
               </select>
             )}
             {variosNumeros && (

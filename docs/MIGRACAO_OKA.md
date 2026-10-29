@@ -29,8 +29,8 @@ roletas, imóveis, Facebook, etiquetas). Referência das regras: `src/routes/man
 |---|---|---|
 | 1 | Modelo de dados (campos da v1 no lead/perfil, descartes, compromissos, campanhas, gastos) + importação completa | ✅ feito, testado local |
 | 2 | Kanban: próximo contato ao mudar de coluna, cadência de chamada (17h / 11h do próximo dia útil), temperatura, venda só com registro + aprovação, descarte normal/extremo + aprovação, devolver ao bolsão, transferir | ✅ no ar na v2 (28/10), e2e 28/28 |
-| 3 | Análise de Crédito: alerta até "Visto", "Retornar com pendência", modal bloqueante, lembrete de hora em hora | ⏳ |
-| 4 | Roleta da v1: toggle "disponível", desliga sozinha no fim do expediente (18:20 / qui 19:30 / sáb 15:20 / dom fechada), almoço, advertências, SLA 5 min, aviso de lead novo 20s | ⏳ |
+| 3 | Análise de Crédito: alerta até "Visto", "Retornar com pendência", modal bloqueante, lembrete de hora em hora | ✅ no ar na v2 (29/10) |
+| 4 | Roleta da v1: toggle "disponível", desliga sozinha no fim do expediente (18:20 / qui 19:30 / sáb 15:20 / dom fechada), almoço, advertências, SLA 5 min, aviso de lead novo 20s | ✅ no ar na v2 (29/10) |
 | 5 | Distribuição de Leads (6 abas), "+ Mais Rebatidas" (50/dia, 10/clique, trava com tarefa atrasada), presos, reativar, recadastro entra na roleta quando abrir | ⏳ |
 | 6 | Follow-up da v1: levas 9h30/16h, 1ª mensagem na hora, cancela em 24h, para ao sair da coluna FOLLOW-UP AUTOMÁTICO, fluxo Geral, modelo, arquivar + importar fluxos/execuções | ✅ no ar na v2 (29/10), e2e 46/47; fluxos entram desligados até a virada (`--virada`) |
 | 7 | Agenda: todo lead com corretor tem próximo contato, compromissos da equipe (aviso 1h antes), aniversário, pós-venda 30 dias, etiqueta 🤖 | ⏳ |
