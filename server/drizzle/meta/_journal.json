@@ -337,6 +337,13 @@
       "when": 1793281236320,
       "tag": "0047_striped_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793284610615,
+      "tag": "0048_unusual_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

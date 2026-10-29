@@ -21,6 +21,10 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
   const setVendaLeadId = useAppStore(s => s.setVendaLeadId);
   const setDescarteLeadId = useAppStore(s => s.setDescarteLeadId);
   const ask = useAppStore(s => s.ask);
+  const creditoVisto = useAppStore(s => s.creditoVisto);
+  const creditoPendencia = useAppStore(s => s.creditoPendencia);
+  const [pendObs, setPendObs] = useState<string | null>(null);
+  const emCredito = colunas.find(c => c.id === L.colunaId)?.slug === 'credito';
 
   const vendaFechada = !!L.dataFechamento && !L.vendaPendente;
   const travado = vendaFechada || !!L.vendaPendente;
@@ -50,6 +54,30 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
       {L.vendaPendente && <Faixa cor="var(--terra)">Venda de {L.valorVenda ? BRL(L.valorVenda) : '—'} aguardando aprovação do gerente/dono.</Faixa>}
       {L.descartePendente && <Faixa cor="var(--terra)">Descarte "{L.motivo}" aguardando aprovação do gerente/dono.</Faixa>}
       {L.descartadoEm && !L.descartePendente && <Faixa cor="var(--muted)">Descartado: {L.motivo || '—'}</Faixa>}
+
+      {emCredito && (
+        <div style={{ border: '1px solid ' + (L.creditoAprovadoEm ? 'var(--olive)' : '#DC2626'), borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: L.creditoAprovadoEm ? 'var(--olive)' : '#DC2626' }}>
+            {L.creditoAprovadoEm ? 'Análise de Crédito: visto em ' + fmt(L.creditoAprovadoEm) : 'Análise de Crédito: aguardando o visto da gestão'}
+          </p>
+          {isManager && (
+            pendObs === null ? (
+              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                {!L.creditoAprovadoEm && <button onClick={() => creditoVisto(L.id)} style={{ ...btnPrim, background: 'var(--olive)' }}>Visto</button>}
+                <button onClick={() => setPendObs('')} style={{ ...btnSec, color: 'var(--terra)' }}>Retornar com pendência</button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                <textarea autoFocus value={pendObs} onChange={e => setPendObs(e.target.value)} rows={2} placeholder="O que está faltando? (aparece pro corretor)" style={{ ...inputCss, resize: 'vertical' }} />
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button disabled={!pendObs.trim()} onClick={async () => { if (await creditoPendencia(L.id, pendObs.trim())) setPendObs(null); }} style={{ ...btnPrim, opacity: pendObs.trim() ? 1 : 0.5 }}>Devolver ao corretor</button>
+                  <button onClick={() => setPendObs(null)} style={btnSec}>Cancelar</button>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, alignItems: 'center' }}>
         {([['quente', 'Quente', Flame, '#DC2626'], ['morno', 'Morno', Sun, '#D97706'], ['frio', 'Frio', Snowflake, '#2563EB']] as const).map(([v, rot, Icone, cor]) => (

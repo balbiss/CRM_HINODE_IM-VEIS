@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { notificar } from '../lib/notificar.js';
+import { avisarNovaPasta, avisarPendencia } from '../lib/credito.js';
+import { and, asc, eq, gte, isNull, lt, sql, getTableColumns } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, recusasLead, imobiliarias, notificacoes, imoveis, descartesLeads } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -26,7 +28,10 @@ export function leadsRouter(io: SocketServer) {
     const scoped = role === 'corretor'
       ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub), eq(leads.importacaoPendente, false))
       : and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.importacaoPendente, false));
-    const rows = await db.select().from(leads).where(scoped);
+    // sem os campos pesados que a lista não usa (respostas do Agente de IA, controle interno, id da v1)
+    const { iaDados: _a, iaAguardandoDesde: _b, okaId: _c, recadastroOrigem: _d, iaTurnos: _e, iaMsgsCliente: _f,
+      lembreteAniversarioAno: _g, lembretePosVendaEm: _h, ...colunasLista } = getTableColumns(leads);
+    const rows = await db.select(colunasLista).from(leads).where(scoped);
     // etiquetas de cada lead (mesmo escopo — join por lead_id)
     const vinculos = await db.select({ leadId: leadTags.leadId, tagId: leadTags.tagId })
       .from(leadTags).innerJoin(leads, eq(leadTags.leadId, leads.id)).where(scoped);
@@ -133,7 +138,8 @@ export function leadsRouter(io: SocketServer) {
     }
 
     const [row] = await db.update(leads)
-      .set({ colunaId, entrouNaColunaEm: new Date(), ultimaAcaoEm: new Date(), ...extra })
+      // entrou em ANÁLISE DE CRÉDITO: o alerta vermelho acende de novo até a gestão dar "Visto"
+      .set({ colunaId, entrouNaColunaEm: new Date(), ultimaAcaoEm: new Date(), ...extra, ...(col.slug === 'credito' ? { creditoAprovadoEm: null } : {}) })
       .where(scoped)
       .returning();
     if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
@@ -143,6 +149,7 @@ export function leadsRouter(io: SocketServer) {
     const [colAntes] = antes.colunaId
       ? await db.select({ slug: colunasKanban.slug }).from(colunasKanban).where(eq(colunasKanban.id, antes.colunaId)).limit(1)
       : [];
+    if (col.slug === 'credito') void avisarNovaPasta(imobiliariaId, row).catch(e => console.error('crédito aviso:', e.message));
     if (colAntes?.slug === 'followup_auto' || col.slug === 'rebatida') {
       void encerrarPorLead(io, imobiliariaId, row.id, colAntes?.slug === 'followup_auto' ? 'corretor tirou o card da coluna FOLLOW-UP AUTOMÁTICO' : 'lead saiu do funil');
     }
@@ -212,7 +219,7 @@ export function leadsRouter(io: SocketServer) {
       const gestores = await db.select({ id: perfis.id }).from(perfis)
         .where(and(eq(perfis.imobiliariaId, imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
       if (gestores.length) {
-        await db.insert(notificacoes).values(gestores.map(g => ({
+        await notificar(gestores.map(g => ({
           perfilId: g.id, leadId: antes.id, tipo: 'aprovacao_descarte', titulo: 'Descarte pra aprovar: ' + antes.nome, texto: motivo + ' · pedido por ' + nome,
         })));
       }
@@ -227,6 +234,33 @@ export function leadsRouter(io: SocketServer) {
       registrarEvento(imobiliariaId, antes.id, 'descarte', 'Lead devolvido: ' + motivo + (observacao ? ' — ' + observacao : ''), nome);
     }
     void encerrarPorLead(io, imobiliariaId, antes.id, 'lead descartado');
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // Análise de Crédito (dono/gerente): "Visto" = documentação auditada, o alerta vermelho apaga.
+  router.post('/:id/credito/visto', requireRole('dono', 'gerente'), async (req, res) => {
+    const { imobiliariaId, nome } = req.auth!;
+    const [row] = await db.update(leads).set({ creditoAprovadoEm: new Date(), ultimaAcaoEm: new Date() })
+      .where(and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId))).returning();
+    if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
+    registrarEvento(imobiliariaId, row.id, 'credito', 'Visto na Análise de Crédito — documentação auditada', nome);
+    io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+    res.json(row);
+  });
+
+  // "Retornar com pendência": volta pro corretor em PENDENTE com a nota do que falta (modal pro corretor).
+  router.post('/:id/credito/pendencia', requireRole('dono', 'gerente'), async (req, res) => {
+    const parsed = z.object({ observacao: z.string().trim().min(1).max(1000) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Escreva o que está faltando.' });
+    const { imobiliariaId, nome } = req.auth!;
+    const pendente = await colunaPorSlug(imobiliariaId, 'pendente');
+    const [row] = await db.update(leads).set({
+      ...(pendente ? { colunaId: pendente.id, entrouNaColunaEm: new Date() } : {}), ultimaAcaoEm: new Date(),
+    }).where(and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId))).returning();
+    if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
+    registrarEvento(imobiliariaId, row.id, 'alerta', 'Análise de Crédito retornada com pendência: ' + parsed.data.observacao, nome);
+    await avisarPendencia(row, parsed.data.observacao);
     io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
     res.json(row);
   });
@@ -258,7 +292,7 @@ export function leadsRouter(io: SocketServer) {
     const gestores = await db.select({ id: perfis.id }).from(perfis)
       .where(and(eq(perfis.imobiliariaId, imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
     if (gestores.length) {
-      await db.insert(notificacoes).values(gestores.map(g => ({
+      await notificar(gestores.map(g => ({
         perfilId: g.id, leadId: antes.id, tipo: 'aprovacao_venda', titulo: 'Venda pra aprovar: ' + antes.nome, texto: 'Registrada por ' + nome,
       })));
     }
@@ -499,7 +533,7 @@ export function leadsRouter(io: SocketServer) {
     if (!atualizado) return res.status(409).json({ error: 'Alguém puxou essa rebatida primeiro. Tenta de novo.' });
 
     await db.insert(distribuicaoLog).values({ imobiliariaId, leadId: lead.id, corretorId: alvoId, origem: 'rebatida-puxada' });
-    await db.insert(notificacoes).values({ perfilId: alvoId, tipo: 'lead', titulo: 'Rebatida puxada', texto: atualizado.nome + ' voltou pra sua carteira.', lida: false });
+    await notificar({ perfilId: alvoId, tipo: 'lead', titulo: 'Rebatida puxada', texto: atualizado.nome + ' voltou pra sua carteira.' });
     registrarEvento(imobiliariaId, lead.id, 'roleta', 'Rebatida puxada do bolsão por ' + nome, nome);
     io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', atualizado);
 

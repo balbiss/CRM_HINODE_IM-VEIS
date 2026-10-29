@@ -336,6 +336,8 @@ export const filasAtendimento = pgTable('filas_atendimento', {
   posicao: integer('posicao').notNull().default(0),
   // Quando esse corretor recebeu o último lead DESSA roleta — o próximo vai pro que faz mais tempo.
   ultimaAtribuicao: timestamp('ultima_atribuicao', { withTimezone: true }),
+  // v1: quem ligou o "disponível" depois das 14h fica fora do turno (não recebe) até o próximo dia
+  ativoNoTurno: boolean('ativo_no_turno').notNull().default(true),
 }, table => ({
   membroUq: uniqueIndex('filas_roleta_corretor_uq').on(table.roletaId, table.corretorId),
 }));

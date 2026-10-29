@@ -390,6 +390,11 @@ export default function Kanban() {
                                 Entrou {dataHoraCurta(l.criadoEm)}
                               </span>
                             )}
+                            {c.slug === 'credito' && !l.creditoAprovadoEm && (
+                              <span style={{ display: 'inline-block', marginTop: 4, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 20, background: 'rgba(220,38,38,.12)', color: '#DC2626' }}>
+                                Aguardando visto da gestão
+                              </span>
+                            )}
                             {l.proximoContatoEm && (() => {
                               const atrasado = +new Date(l.proximoContatoEm) < Date.now();
                               return (

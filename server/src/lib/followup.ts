@@ -12,6 +12,7 @@
  *  - enquanto roda, o card fica em FOLLOW-UP AUTOMÁTICO; quando para, volta pra TAREFAS com
  *    próximo contato pra hoje (com etiqueta do motivo no histórico). */
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { notificar } from './notificar.js';
 import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import {
@@ -246,7 +247,7 @@ async function marcarRespondeu(io: SocketServer, ex: Exec) {
   if (ult) await db.update(followupEnvios).set({ respondeuApos: true }).where(eq(followupEnvios.id, ult.id));
   if (ex.corretorId) {
     const [l] = await db.select({ nome: leads.nome, telefone: leads.telefone }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
-    await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_respondido', titulo: (l?.nome || l?.telefone || 'Lead') + ' respondeu o follow-up' });
+    await notificar({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_respondido', titulo: (l?.nome || l?.telefone || 'Lead') + ' respondeu o follow-up' });
   }
 }
 
@@ -329,7 +330,7 @@ async function limparParados(io: SocketServer) {
       });
       if (ok && ex.corretorId) {
         const [l] = await db.select({ nome: leads.nome, telefone: leads.telefone }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
-        await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up cancelado (WhatsApp desconectado) — faça contato manual com ' + (l?.nome || l?.telefone || 'o lead') });
+        await notificar({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up cancelado (WhatsApp desconectado) — faça contato manual com ' + (l?.nome || l?.telefone || 'o lead') });
       }
       continue;
     }
@@ -538,10 +539,10 @@ async function registrarErro(io: SocketServer, ex: Exec, erro: string) {
   const [l] = await db.select({ nome: leads.nome }).from(leads).where(eq(leads.id, ex.leadId)).limit(1);
   registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" travado após 3 tentativas de envio sem sucesso ('
     + erro + '). Mande mensagem manual pra esse lead. 🤖 Robô não conseguiu enviar', null);
-  if (ex.corretorId) await db.insert(notificacoes).values({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado — mande mensagem manual pra ' + (l?.nome || 'esse lead') });
+  if (ex.corretorId) await notificar({ perfilId: ex.corretorId, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado — mande mensagem manual pra ' + (l?.nome || 'esse lead') });
   const gestores = await db.select({ id: perfis.id }).from(perfis).where(and(eq(perfis.imobiliariaId, ex.imobiliariaId), inArray(perfis.role, ['dono', 'gerente'])));
   if (gestores.length) {
-    await db.insert(notificacoes).values(gestores.map(g => ({ perfilId: g.id, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado (falha de envio) — lead: ' + (l?.nome || 'sem nome') })));
+    await notificar(gestores.map(g => ({ perfilId: g.id, leadId: ex.leadId, tipo: 'followup_erro', titulo: 'Follow-up travado (falha de envio) — lead: ' + (l?.nome || 'sem nome') })));
   }
   await devolverPraTarefas(io, ex);
   avisarMudou(io, ex.imobiliariaId, ex.leadId);

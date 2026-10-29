@@ -5,6 +5,7 @@ import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import { roletas, filasAtendimento, perfis, sessoesWhatsapp } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { inicioSemana } from '../lib/roletaOka.js';
 import { garantirRoletaPadrao } from '../lib/roleta.js';
 
 const CANAIS = ['WhatsApp', 'Instagram', 'Facebook', 'Site', 'Indicacao', 'Manual'] as const;
@@ -25,6 +26,7 @@ export function roletasRouter(io: SocketServer) {
       roletaId: filasAtendimento.roletaId, corretorId: filasAtendimento.corretorId,
       posicao: filasAtendimento.posicao, ultimaAtribuicao: filasAtendimento.ultimaAtribuicao,
       nome: perfis.nome, emPlantao: perfis.emPlantao, bloqueado: perfis.bloqueado,
+      emAlmoco: perfis.emAlmoco, advertencias: perfis.advertenciasSemana, advSemana: perfis.advertenciaSemanaInicio, ativoNoTurno: filasAtendimento.ativoNoTurno,
     }).from(filasAtendimento)
       .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
       .where(eq(filasAtendimento.imobiliariaId, imobiliariaId))
@@ -36,6 +38,7 @@ export function roletasRouter(io: SocketServer) {
         .sort((a, b) => b.ultimaAtribuicao!.getTime() - a.ultimaAtribuicao!.getTime())[0]?.corretorId ?? null,
       membros: membros.filter(m => m.roletaId === r.id).map(m => ({
         corretorId: m.corretorId, nome: m.nome, posicao: m.posicao, emPlantao: m.emPlantao, bloqueado: m.bloqueado,
+        emAlmoco: m.emAlmoco, ativoNoTurno: m.ativoNoTurno, advertencias: m.advSemana === inicioSemana() ? m.advertencias : 0,
       })),
     })));
   });

@@ -2,6 +2,7 @@
  *  Ficam no servidor (não só na tela) pra valer igual vindo do card, do Kanban, do assistente de voz
  *  ou de qualquer automação. Referência: manual da v1 (src/routes/manual.tsx do repo imocrm). */
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import { notificar } from './notificar.js';
 import { db } from '../db/client.js';
 import { colunasKanban, leads, perfis, distribuicaoLog, notificacoes } from '../db/schema.js';
 
@@ -81,7 +82,7 @@ export async function distribuirLeads(imobiliariaId: string, leadIds: string[], 
   await db.insert(distribuicaoLog).values(rows.map(r => ({ imobiliariaId, leadId: r.id, corretorId, origem: tipo })));
   await db.update(perfis).set({ ultimoLeadRecebidoEm: agora }).where(eq(perfis.id, corretorId));
   if (tipo === 'manual') {
-    await db.insert(notificacoes).values(rows.map(r => ({
+    await notificar(rows.map(r => ({
       perfilId: corretorId, leadId: r.id, tipo: 'lead_novo_atribuido', titulo: 'Lead atribuído a você: ' + (r.nome || r.telefone),
     })));
   }

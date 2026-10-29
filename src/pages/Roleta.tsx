@@ -56,7 +56,7 @@ export default function Roleta() {
             Cada roleta é uma equipe. O lead entra na roleta que casa as regras (canal + finalidade + número de WhatsApp);
             se não casar nenhuma, cai na roleta padrão. {filaFixa
               ? 'Dentro dela, a fila é fixa: um lead pra cada, na ordem da lista (1, 2, 3…), e volta pro começo. Só quem está bloqueado é pulado.'
-              : 'Dentro dela, vai pro corretor em plantão que faz mais tempo sem receber.'}
+              : 'Dentro dela, o 1º da fila que está disponível recebe e vai pro fim. Roleta: seg–sex até 18:20, quinta até 19:30, sábado até 15:20, domingo fechada — no horário de fechar, todo mundo sai sozinho (ligue de novo ao chegar). Ligar depois das 14h dá advertência; 3 na semana tiram da roleta. Lead sem nenhum contato em 5 minutos passa pro próximo.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -118,6 +118,7 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
   onMembros: (ids: string[]) => void;
 }) {
   const [expand, setExpand] = useState(false);
+  const toggleAlmoco = useAppStore(s => s.toggleAlmoco);
   const membros = [...roleta.membros].sort((a, b) => a.posicao - b.posicao);
   // Fila fixa: o próximo é quem vem depois de quem recebeu por último (mesma conta do servidor).
   const ultimoIdx = filaFixa ? membros.findIndex(m => m.corretorId === roleta.ultimoCorretorId) : -1;
@@ -224,7 +225,13 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
             {i === ultimoIdx && i !== proximoIdx && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>recebeu o último</span>}
             {filaFixa
               ? m.bloqueado && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>bloqueado</span>
-              : !m.emPlantao && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>fora</span>}
+              : !m.emPlantao ? <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>fora</span>
+              : m.emAlmoco ? <span style={{ fontSize: 10.5, color: 'var(--terra)' }}>almoço</span>
+              : m.ativoNoTurno === false ? <span style={{ fontSize: 10.5, color: 'var(--terra)' }}>fora do turno</span> : null}
+            {!!m.advertencias && <span title="Advertências na semana (3 tiram da roleta)" style={{ fontSize: 10.5, fontWeight: 700, color: m.advertencias >= 3 ? '#DC2626' : 'var(--terra)' }}>⚠ {m.advertencias}</span>}
+            {!filaFixa && m.emPlantao && (isManager || m.nome === meNome) && (
+              <button onClick={() => toggleAlmoco(m.corretorId)} title={m.emAlmoco ? 'Voltar do almoço' : 'Sair pro almoço'} style={{ border: '1px solid var(--line)', background: 'none', borderRadius: 6, fontSize: 10.5, padding: '2px 7px', color: 'var(--muted)' }}>{m.emAlmoco ? 'voltei' : 'almoço'}</button>
+            )}
             {isManager && (
               <>
                 <button onClick={() => mover(i, -1)} disabled={i === 0} style={{ border: 'none', background: 'none', color: 'var(--muted)', opacity: i === 0 ? 0.3 : 1 }}><ArrowUp size={13} /></button>

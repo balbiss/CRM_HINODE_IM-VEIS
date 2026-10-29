@@ -5,6 +5,8 @@ import { enviarPush } from './push.js';
 import { registrarEvento } from './eventos.js';
 import { numeroCentralDoLead } from './numeros.js';
 import { dispararGatilhoLeadNovo } from './followup.js';
+import { proximoDaFilaOka } from './roletaOka.js';
+import { notificar } from './notificar.js';
 import type { Server as SocketServer } from 'socket.io';
 
 type Roleta = typeof roletas.$inferSelect;
@@ -183,36 +185,40 @@ export async function distribuirLead(io: SocketServer, imobiliariaId: string, le
     escolhido = { corretorId: r.corretorId };
     lead = r.lead;
   } else {
-    // Modo normal: vai pro corretor em plantão que faz mais tempo sem receber desta roleta.
-    const candidatos = await db
-      .select({ corretorId: filasAtendimento.corretorId })
-      .from(filasAtendimento)
-      .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
-      .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(perfis.bloqueado, false), eq(perfis.emPlantao, true)))
-      .orderBy(sql`${filasAtendimento.ultimaAtribuicao} asc nulls first`, asc(filasAtendimento.posicao))
-      .limit(1);
-    if (!candidatos[0]) return null;
-    escolhido = candidatos[0];
-
-    await db.update(filasAtendimento).set({ ultimaAtribuicao: new Date() })
-      .where(and(eq(filasAtendimento.roletaId, roleta.id), eq(filasAtendimento.corretorId, escolhido.corretorId)));
-
-    const [atribuido] = await db.update(leads).set({ corretorId: escolhido.corretorId })
-      .where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
+    // Regras da v1: 1º da fila que está disponível (fora do almoço, sem 3 advertências, no turno, dentro
+    // do expediente) recebe e vai pro fim. Ninguém disponível → o lead vai pro bolsão (REBATIDA).
+    const proximo = await proximoDaFilaOka(roleta.id);
+    if (!proximo) {
+      const [reb] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
+        .where(and(eq(colunasKanban.imobiliariaId, imobiliariaId), eq(colunasKanban.slug, 'rebatida'))).limit(1);
+      if (reb) {
+        const [semDono] = await db.update(leads).set({ colunaId: reb.id, entrouNaColunaEm: new Date() })
+          .where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
+        if (semDono) {
+          registrarEvento(imobiliariaId, leadId, 'roleta', 'Nenhum corretor disponível na roleta — lead ficou no bolsão (rebatidas)', 'Roleta');
+          io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', semDono);
+        }
+      }
+      return null;
+    }
+    escolhido = { corretorId: proximo };
+    const agora = new Date();
+    const [atribuido] = await db.update(leads).set({
+      corretorId: proximo, dataAtribuicao: agora, primeiroContatoEm: null,
+      proximoContatoEm: sql`coalesce(${leads.proximoContatoEm}, now())`,
+    }).where(and(eq(leads.id, leadId), isNull(leads.corretorId))).returning();
     if (!atribuido) return null;
+    await db.update(perfis).set({ ultimoLeadRecebidoEm: agora }).where(eq(perfis.id, proximo));
     lead = atribuido;
   }
 
   await db.insert(distribuicaoLog).values({ imobiliariaId, leadId, corretorId: escolhido.corretorId, origem: 'roleta', roletaId: roleta.id });
   const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, escolhido.corretorId)).limit(1);
   registrarEvento(imobiliariaId, leadId, 'roleta', 'Distribuído pela roleta "' + roleta.nome + '" para ' + (corr?.nome ?? 'corretor'), 'Roleta');
-  await db.insert(notificacoes).values({
-    perfilId: escolhido.corretorId,
-    tipo: 'lead',
-    titulo: 'Novo lead atribuído a você',
-    texto: `${lead.nome} caiu na sua carteira pela roleta ${roleta.nome}.`,
-    lida: false,
-  });
+  // v1: lead que chegou pelo WhatsApp do próprio corretor não gera esse aviso
+  if (lead.canal !== 'WhatsApp') {
+    await notificar({ perfilId: escolhido.corretorId, leadId: lead.id, tipo: 'lead_novo_atribuido', titulo: 'Novo lead recebido: ' + (lead.nome || lead.telefone) }, { push: false });
+  }
 
   io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', lead);
   enviarPush(escolhido.corretorId, {
@@ -227,6 +233,13 @@ export async function distribuirLead(io: SocketServer, imobiliariaId: string, le
     sessaoWhatsappId: lead.sessaoWhatsappId,
   }, roleta.sessaoWhatsappId ?? roleta.numeroPrimeiroContatoId ?? null);
   return escolhido.corretorId;
+}
+
+/** Roleta que recebe esse lead (mesma escolha da distribuição) — usada no SLA de 5 min. */
+export async function roletaDoLead(imobiliariaId: string, leadId: string): Promise<string | null> {
+  const [d] = await db.select({ canal: leads.canal, finalidade: leads.finalidade, sessaoWhatsappId: leads.sessaoWhatsappId }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  if (!d) return null;
+  return (await escolherRoleta(imobiliariaId, d))?.id ?? null;
 }
 
 /** Distribui todos os leads da coluna "Lead Novo" que ainda estão sem corretor (round-robin).

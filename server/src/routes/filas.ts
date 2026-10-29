@@ -8,6 +8,7 @@ import { desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { isBusinessHoursOpen, horarioAtendimentoLabel } from '../lib/schedule.js';
 import { distribuirPendentes, garantirRoletaPadrao } from '../lib/roleta.js';
+import { entrarNaRoleta, expedienteAberto, HORARIO_ROLETA, estadoRoleta } from '../lib/roletaOka.js';
 import type { Server as SocketServer } from 'socket.io';
 
 export function filasRouter(io: SocketServer) {
@@ -24,6 +25,7 @@ export function filasRouter(io: SocketServer) {
         nome: perfis.nome,
         emPlantao: perfis.emPlantao,
         bloqueado: perfis.bloqueado,
+        ativoNoTurno: filasAtendimento.ativoNoTurno,
       })
       .from(filasAtendimento)
       .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
@@ -32,7 +34,8 @@ export function filasRouter(io: SocketServer) {
 
     const vistos = new Set<string>();
     const unico = rows.filter(r => (vistos.has(r.corretorId) ? false : vistos.add(r.corretorId)));
-    res.json(unico);
+    const estado = new Map((await estadoRoleta(req.auth!.imobiliariaId)).map(e => [e.corretorId, e]));
+    res.json(unico.map(r => ({ ...r, emAlmoco: estado.get(r.corretorId)?.emAlmoco ?? false, advertencias: estado.get(r.corretorId)?.advertencias ?? 0 })));
   });
 
   // Histórico de distribuição da roleta (últimas 100). Corretor vê só as dele.
@@ -94,8 +97,8 @@ export function filasRouter(io: SocketServer) {
     const vaiLigar = !alvo.emPlantao;
     if (vaiLigar) {
       if (alvo.bloqueado) return res.status(403).json({ error: alvo.nome + ' está com acesso bloqueado — não pode entrar na roleta' });
-      const [imob] = await db.select({ h: imobiliarias.horarioAtendimento }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
-      if (!isBusinessHoursOpen(imob?.h)) return res.status(403).json({ error: horarioAtendimentoLabel(imob?.h) });
+      // v1: fora do expediente da roleta não dá pra ficar disponível
+      if (!expedienteAberto()) return res.status(403).json({ error: HORARIO_ROLETA });
 
       // Se o corretor não participa de NENHUMA roleta, entra na padrão (senão ficar online não
       // adianta nada). Se já é membro de alguma, respeita o que o gerente configurou.
@@ -110,16 +113,33 @@ export function filasRouter(io: SocketServer) {
       }
     }
 
-    const [row] = await db.update(perfis)
-      .set({ emPlantao: vaiLigar })
-      .where(eq(perfis.id, parsed.data.corretorId))
-      .returning();
+    // v1 entrar_na_roleta: depois das 14h dá advertência e não entra no turno; 3 na semana tira da roleta
+    let aviso: string | null = null;
+    if (vaiLigar) {
+      const r = await entrarNaRoleta(parsed.data.corretorId);
+      if (r.atrasado) aviso = 'Entrou depois das 14h: advertência registrada (' + r.advertencias + ' na semana) e fica fora do turno de hoje.';
+      else if (!r.ativo) aviso = '3 advertências na semana — fora da roleta até a semana virar.';
+    } else {
+      await db.update(perfis).set({ emPlantao: false }).where(eq(perfis.id, parsed.data.corretorId));
+    }
+    const [row] = await db.select().from(perfis).where(eq(perfis.id, parsed.data.corretorId)).limit(1);
 
     io.to('imobiliaria:' + imobiliariaId).emit('fila:atualizada', { corretorId: row.id, emPlantao: row.emPlantao });
     io.to('imobiliaria:' + imobiliariaId).emit('roletas:mudou', {});
-    res.json({ corretorId: row.id, emPlantao: row.emPlantao });
+    res.json({ corretorId: row.id, emPlantao: row.emPlantao, aviso });
+  });
 
-    if (vaiLigar) distribuirPendentes(io, imobiliariaId).catch(e => console.error('roleta pendentes:', (e as Error).message));
+  // Almoço (v1): enquanto estiver em almoço o corretor não recebe lead, mas não perde o lugar na fila.
+  router.patch('/almoco', async (req, res) => {
+    const parsed = toggleSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'corretorId inválido' });
+    const { imobiliariaId, role, sub } = req.auth!;
+    if (role === 'corretor' && parsed.data.corretorId !== sub) return res.status(403).json({ error: 'Só o gerente altera o almoço de outro corretor' });
+    const [alvo] = await db.select().from(perfis).where(and(eq(perfis.id, parsed.data.corretorId), eq(perfis.imobiliariaId, imobiliariaId))).limit(1);
+    if (!alvo) return res.status(404).json({ error: 'Corretor não encontrado' });
+    const [row] = await db.update(perfis).set({ emAlmoco: !alvo.emAlmoco }).where(eq(perfis.id, alvo.id)).returning();
+    io.to('imobiliaria:' + imobiliariaId).emit('roletas:mudou', {});
+    res.json({ corretorId: row.id, emAlmoco: row.emAlmoco });
   });
 
   router.post('/distribuir', async (req, res) => {

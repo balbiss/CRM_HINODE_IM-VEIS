@@ -23,7 +23,7 @@ export interface SessaoWhatsapp {
 export interface NumeroCentral { id: string; rotulo: string | null; numero: string | null }
 
 export type RoletaFinalidade = 'venda' | 'locacao' | 'ambos';
-export interface RoletaMembro { corretorId: string; nome: string; posicao: number; emPlantao: boolean; bloqueado: boolean }
+export interface RoletaMembro { corretorId: string; nome: string; posicao: number; emPlantao: boolean; bloqueado: boolean; emAlmoco?: boolean; ativoNoTurno?: boolean; advertencias?: number }
 export interface RemoteRoleta {
   id: string; nome: string; ativa: boolean; ordem: number; padrao: boolean;
   canais: string[]; finalidade: RoletaFinalidade; sessaoWhatsappId: string | null; ultimoCorretorId?: string | null; numeroPrimeiroContatoId?: string | null;
@@ -344,6 +344,12 @@ interface AppState {
   pickMotivoDescarte: (motivo: string) => void;
   requestApproval: () => void;
 
+  /** Avisos que abrem modal bloqueante (v1: nova pasta / pendência / lembrete do crédito). */
+  alertasModal: RemoteNotificacao[];
+  fecharAlertaModal: (id: string) => void;
+  toggleAlmoco: (corretorId: string) => Promise<void>;
+  creditoVisto: (leadId: string) => Promise<void>;
+  creditoPendencia: (leadId: string, observacao: string) => Promise<boolean>;
   setMoverPendente: (v: AppState['moverPendente']) => void;
   setVendaLeadId: (id: string | null) => void;
   setDescarteLeadId: (id: string | null) => void;
@@ -428,6 +434,9 @@ interface AppState {
 }
 
 let alertTimer: ReturnType<typeof setInterval> | undefined;
+/** v1: estes avisos abrem um modal no meio da tela (não só o sino). */
+const TIPOS_MODAL = ['nova_analise_credito', 'analise_credito_pendencia', 'analise_credito_lembrete'];
+let notifTimer: ReturnType<typeof setInterval> | undefined;
 
 function beep() {
   try {
@@ -533,7 +542,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   convId: null, convDraft: '', convQuery: '', convCorretor: 'Todos os corretores', convTyping: false,
 
   discardOpen: false, discardWarn: null,
-  moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [],
+  moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [], alertasModal: [],
 
   conn: { 'Camila Rocha': true, 'Diego Antunes': true, 'Fernanda Lopes': false, 'Marcelo Braga': false, 'Priscila Nunes': true, 'Rafael Teixeira': false },
   qrFor: null, importOpen: false, newLeadOpen: false, templates: [], imoveis: [], linksUteis: [], treinamentos: [],
@@ -655,6 +664,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     socket.off('lead:created').on('lead:created', upsert);
     socket.off('lead:updated').on('lead:updated', upsert);
+    socket.off('notificacao:nova').on('notificacao:nova', (n: RemoteNotificacao) => {
+      set(s => ({
+        notificacoes: [n, ...s.notificacoes.filter(x => x.id !== n.id)].slice(0, 50),
+        alertasModal: TIPOS_MODAL.includes(n.tipo) && !s.alertasModal.some(a => a.id === n.id) ? [...s.alertasModal, n] : s.alertasModal,
+      }));
+      if (TIPOS_MODAL.includes(n.tipo)) toqueLeadNovo();
+      notificarNavegador(n.titulo, n.texto ?? '');
+    });
     socket.off('lead:tags').on('lead:tags', (msg: { leadId: string; tagIds: string[] }) => {
       set(s => ({ leads: s.leads.map(l => (l.id === msg.leadId ? { ...l, tags: msg.tagIds } : l)) }));
     });
@@ -866,6 +883,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().toast(e.status === 409 ? e.message : 'Não deu pra salvar — ' + l.nome + ' voltou pra coluna anterior');
       });
   },
+  toggleAlmoco: async corretorId => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      const r = await apiFetch<{ emAlmoco: boolean }>('/api/filas/almoco', token, { method: 'PATCH', body: JSON.stringify({ corretorId }) });
+      get().toast(r.emAlmoco ? 'Em almoço — não recebe lead até voltar' : 'Voltou do almoço');
+      await get().fetchRoletas();
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível mudar o almoço'); }
+  },
+  fecharAlertaModal: id => {
+    set(s => ({ alertasModal: s.alertasModal.filter(a => a.id !== id) }));
+    get().marcarNotifLida(id);
+  },
+  creditoVisto: async leadId => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      await apiFetch('/api/leads/' + leadId + '/credito/visto', token, { method: 'POST' });
+      get().toast('Visto registrado — documentação auditada');
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível dar o visto'); }
+  },
+  creditoPendencia: async (leadId, observacao) => {
+    const token = get().token;
+    if (!token) return false;
+    try {
+      await apiFetch('/api/leads/' + leadId + '/credito/pendencia', token, { method: 'POST', body: JSON.stringify({ observacao }) });
+      get().toast('Devolvido ao corretor como Pendente');
+      return true;
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível devolver'); return false; }
+  },
   setMoverPendente: v => set({ moverPendente: v }),
   setVendaLeadId: id => set({ vendaLeadId: id }),
   setDescarteLeadId: id => set({ descarteLeadId: id }),
@@ -1050,18 +1097,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!f.ativo && !isBusinessHoursOpen(get().horarioAtendimento)) {
       // pode ser horário desatualizado (o dono acabou de mudar) — revalida com o servidor antes de barrar
       await get().fetchHorario();
-      if (!isBusinessHoursOpen(get().horarioAtendimento)) { get().fireAlert('fora-horario'); return false; }
     }
 
     const token = get().token;
     if (!token) return false;
     try {
-      const res = await apiFetch<{ corretorId: string; emPlantao: boolean }>('/api/filas/disponibilidade', token, {
+      const res = await apiFetch<{ corretorId: string; emPlantao: boolean; aviso?: string | null }>('/api/filas/disponibilidade', token, {
         method: 'PATCH',
         body: JSON.stringify({ corretorId: f.corretorId }),
       });
       set(s => ({ fila: s.fila.map((x, i) => (i === index ? { ...x, ativo: res.emPlantao } : x)) }));
-      get().toast(f.nome + (res.emPlantao ? ' entrou na roleta' : ' saiu da roleta'));
+      get().toast(res.aviso || f.nome + (res.emPlantao ? ' entrou na roleta' : ' saiu da roleta'));
       if (res.emPlantao && f.corretorId === get().me?.id) pedirPermissaoNotificacao();
       return true;
     } catch (e) {
@@ -1077,15 +1123,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!token || !me) return;
     const naFila = get().fila.find(f => f.corretorId === me.id);
     const ativoAgora = naFila ? naFila.ativo : !!me.emPlantao;
-    if (!ativoAgora && !isBusinessHoursOpen(get().horarioAtendimento)) {
-      await get().fetchHorario();
-      if (!isBusinessHoursOpen(get().horarioAtendimento)) { get().fireAlert('fora-horario'); return; }
-    }
+    void ativoAgora;
     try {
-      const res = await apiFetch<{ corretorId: string; emPlantao: boolean }>('/api/filas/disponibilidade', token, {
+      const res = await apiFetch<{ corretorId: string; emPlantao: boolean; aviso?: string | null }>('/api/filas/disponibilidade', token, {
         method: 'PATCH',
         body: JSON.stringify({ corretorId: me.id }),
       });
+      if (res.aviso) get().toast(res.aviso);
       set(s => ({
         me: s.me ? { ...s.me, emPlantao: res.emPlantao } : s.me,
         fila: s.fila.some(f => f.corretorId === me.id)
@@ -1832,12 +1876,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAlertMenu: v => set({ alertMenu: v }),
   fireAlert: kind => {
     clearInterval(alertTimer);
-    set({ alert: kind, alertCount: 45, alertMenu: false });
+    // v1: aviso de lead novo com contagem de 20s e som — não existe "recusar": o lead é do corretor.
+    // Quem tira o lead dele é o SLA (5 min sem nenhum contato → próximo da fila), no servidor.
+    set({ alert: kind, alertCount: 20, alertMenu: false });
     beep();
     if (kind === 'lead') {
       alertTimer = setInterval(() => {
         const c = get().alertCount;
-        if (c <= 1) { clearInterval(alertTimer); set({ alert: null, alertCount: 45 }); get().recusarLeadPendente(true); return; }
+        if (c <= 1) {
+          clearInterval(alertTimer);
+          set(s => ({ leadsPendentes: s.leadsPendentes.slice(1) }));
+          if (get().leadsPendentes.length > 0) get().fireAlert('lead'); else set({ alert: null, alertCount: 20 });
+          return;
+        }
         set({ alertCount: c - 1 });
       }, 1000);
     }
@@ -1849,7 +1900,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const lp = get().leadsPendentes[0];
       set(s => ({ leadsPendentes: s.leadsPendentes.slice(1) }));
       if (get().leadsPendentes.length > 0) get().fireAlert('lead'); else get().closeAlert();
-      if (lp) { get().toast('Atendimento aceito — ' + lp.nome); get().openLead(lp.id, 'chat'); }
+      if (lp) get().openLead(lp.id, 'detalhes');
       return;
     }
     get().closeAlert();
@@ -1859,7 +1910,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   alertAlt: () => {
     const k = get().alert;
-    if (k === 'lead') { get().recusarLeadPendente(false); return; }
+    if (k === 'lead') {
+      set(s => ({ leadsPendentes: s.leadsPendentes.slice(1) }));
+      if (get().leadsPendentes.length > 0) get().fireAlert('lead'); else get().closeAlert();
+      return;
+    }
     get().closeAlert();
     if (k === 'visita') get().toast('Visita marcada como confirmada');
     else if (k === 'credito') get().toast('Lembrete adiado por 1 hora');
@@ -1964,6 +2019,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchNotificacoes: () => {
     const token = get().token;
     if (!token) return;
+    if (!notifTimer) notifTimer = setInterval(() => { if (get().token) get().fetchNotificacoes(); else { clearInterval(notifTimer); notifTimer = undefined; } }, 30000);
     apiFetch<RemoteNotificacao[]>('/api/notificacoes', token)
       .then(notificacoes => set({ notificacoes }))
       .catch(() => {});

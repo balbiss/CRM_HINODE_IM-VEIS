@@ -42,8 +42,8 @@ export function AlertModal() {
   const data = alert === 'lead'
     ? {
         titulo: naFila > 0 ? 'Novo lead pra você (+' + naFila + ' na fila)' : 'Novo lead pra você',
-        texto: (leadPendente?.nome || 'Um lead') + ' chegou pelo ' + (leadPendente?.canal || 'WhatsApp') + '. Aceite em ' + alertCount + 's ou ele volta para a roleta.',
-        ok: 'Aceitar atendimento', alt: 'Recusar', showCount: true,
+        texto: (leadPendente?.nome || 'Um lead') + ' chegou pelo ' + (leadPendente?.canal || 'WhatsApp') + '. Responda em até 5 minutos — sem nenhum contato, ele passa pro próximo da fila.',
+        ok: 'Abrir lead', alt: 'Fechar', showCount: true,
       }
     : alert === 'visita'
     ? {

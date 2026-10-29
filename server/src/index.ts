@@ -6,6 +6,10 @@ import { Server } from 'socket.io';
 import { authRouter } from './routes/auth.js';
 import { leadsRouter } from './routes/leads.js';
 import { aprovacoesRouter } from './routes/aprovacoes.js';
+import { setIoNotificacoes } from './lib/notificar.js';
+import compression from 'compression';
+import { lembretesCreditoDaHora } from './lib/credito.js';
+import { desligarFimDeExpediente, reatribuirSlaVencido } from './lib/roletaOka.js';
 import { colunasRouter } from './routes/colunas.js';
 import { filasRouter } from './routes/filas.js';
 import { perfisRouter } from './routes/perfis.js';
@@ -49,6 +53,8 @@ const app = express();
 const corsPublico = cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] });
 const corsRestrito = cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' });
 const publico = (p: string) => p.startsWith('/api/captacao/site') || p.startsWith('/api/sites/publico');
+// gzip: com 11 mil leads a resposta de /api/leads passava de 20 MB sem compressão
+app.use(compression());
 app.use((req, res, next) => (publico(req.path) ? corsPublico : corsRestrito)(req, res, next));
 // Webhook da Meta: guarda o corpo bruto pra conferir a assinatura (x-hub-signature-256).
 app.use(express.json({
@@ -84,7 +90,10 @@ io.use((socket, next) => {
 });
 io.on('connection', socket => {
   socket.join('imobiliaria:' + socket.data.claims.imobiliariaId);
+  // sala pessoal: notificações que são só dessa pessoa chegam na hora (lib/notificar)
+  socket.join('perfil:' + socket.data.claims.sub);
 });
+setIoNotificacoes(io);
 
 app.use('/api/config', configRouter(io));
 app.use('/api/colunas', colunasRouter(io));
@@ -123,6 +132,9 @@ const varrerMinuto = () => {
   varrerTarefasVencidas(io).catch(err => console.error('Tarefas: varredura falhou —', err.message));
   varrerFollowups(io).catch(err => console.error('Follow-up: varredura falhou —', err.message));
   varrerIa(io).catch(err => console.error('Agente IA: varredura falhou —', err.message));
+  lembretesCreditoDaHora().catch(err => console.error('Crédito: lembrete falhou —', err.message));
+  desligarFimDeExpediente(io).catch(err => console.error('Roleta: fim de expediente falhou —', err.message));
+  reatribuirSlaVencido(io).catch(err => console.error('Roleta: SLA falhou —', err.message));
 };
 varrerMinuto();
 setInterval(varrerMinuto, 60 * 1000);

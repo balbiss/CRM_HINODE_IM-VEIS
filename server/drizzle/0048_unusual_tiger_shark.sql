@@ -1,0 +1,1 @@
+ALTER TABLE "filas_atendimento" ADD COLUMN "ativo_no_turno" boolean DEFAULT true NOT NULL;

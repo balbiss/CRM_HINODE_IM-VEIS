@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { and, desc, eq, or } from 'drizzle-orm';
+import { notificar } from '../lib/notificar.js';
 import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import { leads, perfis, descartesLeads, notificacoes } from '../db/schema.js';
@@ -39,7 +40,7 @@ export function aprovacoesRouter(io: SocketServer) {
   }
   function avisar(perfilId: string | null, leadId: string, titulo: string, texto?: string) {
     if (!perfilId) return;
-    void db.insert(notificacoes).values({ perfilId, leadId, tipo: 'aprovacao_resultado', titulo, texto: texto ?? null }).catch(() => {});
+    void notificar({ perfilId, leadId, tipo: 'aprovacao_resultado', titulo, texto: texto ?? null }).catch(() => {});
   }
 
   // Descarte extremo aprovado: sai DE VEZ da roleta e das rebatidas → coluna LEAD DESCADASTRAR.

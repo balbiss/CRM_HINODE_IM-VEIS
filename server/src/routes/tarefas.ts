@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lte, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tarefas, leads, perfis, notificacoes } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -30,6 +30,10 @@ export function tarefasRouter(io: SocketServer) {
     if (typeof req.query.de === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.de)) conds.push(gte(tarefas.venceEm, new Date(req.query.de + 'T00:00:00')));
     if (typeof req.query.ate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.ate)) conds.push(lte(tarefas.venceEm, new Date(req.query.ate + 'T23:59:59')));
     if (req.query.pendentes === '1') conds.push(eq(tarefas.concluida, false));
+    // sem período pedido: abertas + concluídas nos últimos 30 dias (histórico velho só por período)
+    else if (!req.query.de && !req.query.ate && req.query.todas !== '1') {
+      conds.push(or(eq(tarefas.concluida, false), gte(tarefas.venceEm, new Date(Date.now() - 30 * 86400000)))!);
+    }
 
     const rows = await db.select().from(tarefas).where(and(...conds)).orderBy(asc(tarefas.venceEm));
     res.json(rows.length ? await enriquecer(rows) : []);
