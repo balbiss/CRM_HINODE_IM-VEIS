@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosPendentes, contatosIgnorados } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -12,6 +12,7 @@ import { enviarPush } from '../lib/push.js';
 import { registrarEvento } from '../lib/eventos.js';
 import { marcarForaDoHorario } from '../lib/foraDoHorario.js';
 import { pausarPorResposta } from '../lib/followup.js';
+import { notificar } from '../lib/notificar.js';
 import { chaveDaMensagem, enviarAoLead, hubLiberarNumero, publica, reservarChave } from '../lib/whatsappOficial.js';
 import { numeroCentralDoLead } from '../lib/numeros.js';
 import type { Server as SocketServer } from 'socket.io';
@@ -330,6 +331,15 @@ export type MensagemWhatsapp = {
 
 
 /** Tudo o que acontece com uma mensagem do WhatsApp: acha/cria o lead, IA, roleta, mídia, push. */
+/** Um aviso de "possível duplicidade" por lead por dia (memória do processo basta). */
+const avisosDuplicidade = new Map<string, string>();
+function avisouDuplicidadeHoje(leadId: string) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (avisosDuplicidade.get(leadId) === hoje) return true;
+  avisosDuplicidade.set(leadId, hoje);
+  return false;
+}
+
 export async function processarMensagem(io: SocketServer, sessao: typeof sessoesWhatsapp.$inferSelect, m: MensagemWhatsapp) {
   const { fromMe, numero, texto, waId, pushName, anexoTipo } = m;
   const waChave = chaveDaMensagem(waId);
@@ -355,6 +365,21 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
   // amigo...). Fica na lista privada dele até ele decidir "trazer pro CRM" ou "é pessoal".
   if (!lead && espelhoDeCorretor) {
     if (!fromMe) {
+      // v1 "possível duplicidade": quem escreveu já é lead de OUTRO corretor (ou está sem dono / rebatida)
+      // → dono e gerente decidem se transferem. Um aviso por lead por dia.
+      const daImob = await db.select({ id: leads.id, nome: leads.nome, telefone: leads.telefone, corretorId: leads.corretorId })
+        .from(leads).where(eq(leads.imobiliariaId, sessao.imobiliariaId));
+      const outro = daImob.find(l => mesmoNumero(l.telefone, numero));
+      if (outro && !avisouDuplicidadeHoje(outro.id)) {
+        const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
+        const gestores = await db.select({ id: perfis.id }).from(perfis)
+          .where(and(eq(perfis.imobiliariaId, sessao.imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
+        await notificar(gestores.map(g => ({
+          perfilId: g.id, leadId: outro.id, tipo: 'possivel_duplicidade',
+          titulo: 'Possível duplicidade: ' + (outro.nome || outro.telefone) + ' mandou mensagem pro WhatsApp de ' + (corr?.nome ?? 'outro corretor'),
+          texto: outro.corretorId ? 'O lead é de outro corretor — veja se transfere.' : 'O lead está sem corretor (bolsão) — veja se entrega pra quem ele procurou.',
+        })));
+      }
       await db.insert(contatosPendentes).values({
         imobiliariaId: sessao.imobiliariaId, corretorId: sessao.corretorId!, sessaoWhatsappId: sessao.id,
         telefone: numero, nome: pushName || null,

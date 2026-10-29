@@ -112,15 +112,17 @@ export function relatoriosRouter() {
       group by c.id, c.titulo, c.slug, c.ordem order by c.ordem
     `);
 
+    // motivo escolhido no descarte (sem a observação, que deixava cada descarte "único") + desqualificações do Agente de IA
     const motivos = await rows(sql`
-      select coalesce(
-               substring(e.descricao from '^Descartado: (.*)$'),
-               substring(e.descricao from 'desqualificou o lead: (.*?)( — |$)'),
-               e.descricao) as motivo,
-             count(*) as qtd
-      from eventos_lead e
-      where e.imobiliaria_id = ${I} and e.tipo = 'descarte' and e.criado_em >= ${ini} and e.criado_em < ${fim}
-        ${corretor ? sql`and e.ator_nome = ${nome}` : sql``}
+      select motivo, count(*) as qtd from (
+        select d.motivo from descartes_leads d left join perfis p on p.id = d.usuario_id
+        where d.imobiliaria_id = ${I} and d.criado_em >= ${ini} and d.criado_em < ${fim}
+          ${corretor ? sql`and p.nome = ${nome}` : sql``}
+        union all
+        select 'IA: ' || substring(e.descricao from 'desqualificou o lead: (.*?)( — |$)') from eventos_lead e
+        where e.imobiliaria_id = ${I} and e.tipo = 'descarte' and e.descricao like '%desqualificou o lead:%'
+          and e.criado_em >= ${ini} and e.criado_em < ${fim} ${corretor ? sql`and e.ator_nome = ${nome}` : sql``}
+      ) x where motivo is not null
       group by 1 order by 2 desc limit 8
     `);
 

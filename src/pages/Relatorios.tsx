@@ -330,15 +330,15 @@ function BarrasH({ dados, vazio }: { dados: { nome: string; valor: number; extra
   const max = useMemo(() => Math.max(1, ...dados.map(d => d.valor)), [dados]);
   if (!dados.length || dados.every(d => !d.valor) && vazio) return <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{vazio || 'Sem dados.'}</p>;
   return (
-    <div style={{ display: 'grid', gap: 11 }}>
+    <div style={{ display: 'grid', gap: 11, minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {dados.map(d => (
-        <div key={d.nome} title={`${d.nome}: ${d.valor}`}>
+        <div key={d.nome} title={`${d.nome}: ${d.valor}`} style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, marginBottom: 5 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nome}</span>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nome}</span>
             <span style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}><b style={{ color: 'var(--ink)' }}>{d.valor}</b>{d.extra ? ' · ' + d.extra : ''}</span>
           </div>
-          <div style={{ height: 8, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: (d.valor / max) * 100 + '%', background: 'var(--terra)', borderRadius: 4 }} />
+          <div style={{ height: 8, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden', maxWidth: '100%' }}>
+            <div style={{ height: '100%', width: Math.min(100, (d.valor / max) * 100) + '%', background: 'var(--terra)', borderRadius: 4 }} />
           </div>
         </div>
       ))}
