@@ -68,6 +68,7 @@ export function LeadModal() {
   useEffect(() => { if (leadTab === 'chat') paraOFimChat(); }, [chatMsgs.length, leadTab, typing]);
   useEffect(() => { if (leadTab === 'historico' && leadId) fetchEventosLead(leadId); }, [leadTab, leadId, fetchEventosLead]);
 
+  const [prontasAbertas, setProntasAbertas] = useState(false);
   if (!L) return null;
 
   const colAtual = colunas.find(c => c.id === L.colunaId)?.titulo ?? '—';
@@ -98,7 +99,6 @@ export function LeadModal() {
   }
 
 
-  const [prontasAbertas, setProntasAbertas] = useState(false);
 
   return (
     <div onClick={closeLead} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
