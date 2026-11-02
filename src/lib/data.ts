@@ -209,8 +209,10 @@ export function mapMsgs(arr: ChatMsg[]): MappedMsg[] {
       id: m.id, texto: m.texto, hora: m.hora, stamp: stamp(off, m.hora), sep, sepLabel: lab, bot: !!m.bot, ia: !!m.ia,
       anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo, anexoNome: m.anexoNome, visto, transcricao: m.transcricao,
       rowStyle: 'display:flex;justify-content:' + (m.side === 'out' ? 'flex-end' : 'flex-start'),
-      bubbleStyle: 'max-width:72%;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;' +
-        (m.bot ? 'background:#4B3B7A;color:#fff' : m.ia ? 'background:#0F5E57;color:#fff' : m.side === 'out' ? 'background:var(--terra);color:#fff' : 'background:var(--bg);border:1px solid var(--line)'),
+      // balões sólidos com sombra leve e "bico" no canto, como no WhatsApp (ficam legíveis sobre o fundo com padrão)
+      bubbleStyle: 'max-width:72%;padding:9px 13px 7px;border-radius:12px;font-size:13.5px;line-height:1.5;box-shadow:0 1px 1.5px rgba(0,0,0,.13);' +
+        (m.side === 'out' ? 'border-top-right-radius:3px;' : 'border-top-left-radius:3px;') +
+        (m.bot ? 'background:#4B3B7A;color:#fff' : m.ia ? 'background:#0F5E57;color:#fff' : m.side === 'out' ? 'background:var(--terra);color:#fff' : 'background:var(--chatBalao);color:var(--ink)'),
     };
   });
 }

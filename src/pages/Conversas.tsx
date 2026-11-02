@@ -224,7 +224,7 @@ export default function Conversas() {
                 )}
                 <button onClick={() => openLead(CL.id, 'chat')} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Ver lead</button>
               </div>
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div ref={scrollRef} className="chat-fundo" style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {convThread.map(m => (
                   <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {m.sep && (

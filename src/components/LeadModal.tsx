@@ -128,7 +128,7 @@ export function LeadModal() {
           ))}
         </div>
 
-        <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        <div ref={chatScrollRef} className={leadTab === 'chat' ? 'chat-fundo' : undefined} style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           {leadTab === 'detalhes' && (
             <>
               <LeadDetalhesOka lead={L} />
