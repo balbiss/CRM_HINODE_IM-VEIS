@@ -1,6 +1,7 @@
 import { useAppStore } from '../store/appStore';
 
 const FAQ = [
+  { id: 'entraram', q: 'Leads que entraram (Dashboard)', a: 'No Dashboard, o dono e o gerente veem quem chegou hoje e ontem: a hora, a campanha ou canal, a cidade, a etapa e com qual corretor está. Os botões Hoje / Ontem / Hoje + ontem trocam o período. Lead SEM CORRETOR aparece destacado; clique na caixa "Sem corretor" pra ver só esses e em "Distribuir agora" pra ir ao Bolsão. Clicar num lead abre o card.' },
   { id: 'kanban', q: 'Kanban de Leads', a: 'Cada coluna é uma etapa real do seu processo comercial. Arraste o card para mover o lead — o tempo na coluna reinicia e o histórico registra a mudança. Colunas podem ser criadas, renomeadas e reordenadas pelo Dono.' },
   { id: 'roleta', q: 'Roleta de Atendimento', a: 'A roleta distribui leads novos na ordem da fila, pulando quem estiver indisponível. Na "Ordem de prioridade" de cada roleta aparece quem está ONLINE ou OFFLINE e a hora do check-in (quando ficou online). Dono e gerente clicam no status pra colocar ou tirar alguém, e arrastam a linha pra mudar a ordem. Fora do expediente só o dono consegue colocar um corretor online: ele recebe leads até a meia-noite e depois sai sozinho. Quando o dono ou o gerente coloca o corretor online, não conta advertência de "depois das 14h".' },
   { id: 'bolsao', q: 'Bolsão e Rebatidas', a: 'Leads sem corretor, descartados ou sem resposta caem no bolsão. Qualquer corretor pode puxar rebatidas dentro do limite definido pelo gerente.' },
