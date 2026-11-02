@@ -49,7 +49,7 @@ export default function Clientes() {
           return (
             <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
               <span style={{ flex: 1.6, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <ChatAvatar nome={l.nome} foto={l.foto} size={30} />
+                <ChatAvatar nome={l.nome} foto={l.foto} canal={l.canal} size={30} />
                 <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
               </span>
               <span style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>{l.tel}</span>

@@ -104,7 +104,7 @@ export function LeadModal() {
     <div onClick={closeLead} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
       <div onClick={e => e.stopPropagation()} className="modal-card modal-card-full" style={{ width: '100%', maxWidth: 760, maxHeight: '88vh', background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'fadeUp .16s ease' }}>
         <div style={{ padding: '22px 24px 0', display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-          <ChatAvatar nome={L.nome} foto={L.foto} size={46} />
+          <ChatAvatar nome={L.nome} foto={L.foto} canal={L.canal} size={46} />
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontFamily: 'Newsreader,serif', fontSize: 26, lineHeight: 1.15 }}>{L.nome}</span>
             <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>{L.tel} · {L.corretor} · {colAtual}</span>

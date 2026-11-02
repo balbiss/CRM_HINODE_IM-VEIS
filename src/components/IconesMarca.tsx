@@ -17,6 +17,16 @@ export function IconeFacebook({ size = 20, color = '#1877F2', style }: P) {
   );
 }
 
+export function IconeInstagram({ size = 20, color = '#fff', style }: P) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={style} aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="0.6" fill={color} />
+    </svg>
+  );
+}
+
 /** Ícone genérico de site/formulário (globo), no mesmo traço dos outros. */
 export function IconeSite({ size = 20, color = 'var(--terra)', style }: P) {
   return (
