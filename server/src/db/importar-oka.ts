@@ -254,7 +254,14 @@ async function main() {
     }
     if (juntados) console.log(`    ${juntados} lead(s) que já estavam na v2 juntados com o da v1`);
     const atualizar = Object.keys(rows[0] ?? {}).filter(c => c !== 'oka_id' && c !== 'imobiliaria_id');
-    await upsert('leads', rows, atualizar, '(oka_id) where oka_id is not null');
+    // o histórico de etapas (lead_etapas) é da v2: a carga da v1 não pode virar "entrou na etapa hoje"
+    // no Ranking de Consultores — o histórico antigo vem de eventos_lead.
+    await sql`alter table leads disable trigger leads_registrar_etapa`.catch(() => {});
+    try {
+      await upsert('leads', rows, atualizar, '(oka_id) where oka_id is not null');
+    } finally {
+      await sql`alter table leads enable trigger leads_registrar_etapa`.catch(() => {});
+    }
   }
   const leadPorOka = new Map<string, string>();
   for (const r of await sql<{ id: string; oka_id: string }[]>`select id, oka_id from leads where oka_id is not null`) leadPorOka.set(r.oka_id, r.id);

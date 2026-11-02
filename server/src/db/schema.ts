@@ -863,6 +863,22 @@ export const lotesImportacao = pgTable('lotes_importacao', {
   imobIdx: index('lotes_importacao_imobiliaria_id_idx').on(table.imobiliariaId),
 }));
 
+/** Histórico de etapas: cada vez que o card entra numa coluna (ou troca de corretor), quem era o
+ *  corretor e quando. Gravado por TRIGGER no banco (migração 0050) — vale pra qualquer caminho que
+ *  mexa no lead (botão, roleta, follow-up, IA, puxar rebatida). É a base do Ranking de Consultores:
+ *  conta o que cada corretor fez no período, não só os leads que chegaram no período. */
+export const leadEtapas = pgTable('lead_etapas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  leadId: uuid('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  colunaId: uuid('coluna_id').references(() => colunasKanban.id, { onDelete: 'set null' }),
+  corretorId: uuid('corretor_id').references(() => perfis.id, { onDelete: 'set null' }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobDataIdx: index('lead_etapas_imob_data_idx').on(table.imobiliariaId, table.criadoEm),
+  leadIdx: index('lead_etapas_lead_id_idx').on(table.leadId),
+}));
+
 export const distribuicaoLog = pgTable('distribuicao_log', {
   id: uuid('id').primaryKey().defaultRandom(),
   imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),

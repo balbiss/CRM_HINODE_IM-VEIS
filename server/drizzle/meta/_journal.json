@@ -351,6 +351,13 @@
       "when": 1793286217442,
       "tag": "0049_strong_gravity",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793637709838,
+      "tag": "0050_thin_blur",
+      "breakpoints": true
     }
   ]
 }

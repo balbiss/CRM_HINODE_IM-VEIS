@@ -197,3 +197,14 @@ a:hover { color: var(--ink); }
   .conv-col[data-hide='1'] { display: none !important; }
   .conv-back { display: flex !important; }
 }
+
+/* Relatórios: linha/barra clicável */
+.rel-barra:hover { background: var(--bg) !important; }
+.rel-filtros { position: sticky; top: 0; z-index: 20; }
+.rel-filtros .rel-div { display: block; }
+@media (max-width: 760px) {
+  .rel-filtros { position: static; display: grid !important; grid-template-columns: 1fr 1fr; }
+  .rel-filtros .rel-div, .rel-filtros .rel-ou { display: none !important; }
+  .rel-filtros label, .rel-filtros label > select, .rel-filtros label > input, .rel-filtros label > div, .rel-filtros label > div > button { width: 100%; max-width: none !important; }
+  .rel-filtros .rel-mes { grid-column: 1 / -1; }
+}
