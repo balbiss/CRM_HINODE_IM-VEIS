@@ -34,6 +34,23 @@ export function expedienteAberto(d = new Date()) {
   return corte !== null && sp(d).min < corte;
 }
 export const HORARIO_ROLETA = 'A roleta funciona de segunda a sábado: até 18:20 (quinta até 19:30, sábado até 15:20). Domingo fechada.';
+/** Meia-noite (Brasília) que encerra o dia de `d` — até quando vale a liberação do dono fora do expediente. */
+export function fimDoDiaSp(d = new Date()) {
+  const s = sp(d);
+  return new Date(Date.UTC(s.ano, s.mes - 1, s.dia + 1, 3, 0, 0)); // 00:00 em Brasília = 03:00 UTC
+}
+/** Dono liga o corretor fora do expediente: online até o fim do dia, sem advertência, no fim da fila. */
+export async function liberarForaDoExpediente(corretorId: string, agora = new Date()) {
+  const ate = fimDoDiaSp(agora);
+  await db.update(perfis).set({ emPlantao: true, emAlmoco: false, checkinEm: agora, plantaoLiberadoAte: ate }).where(eq(perfis.id, corretorId));
+  const filas = await db.select().from(filasAtendimento).where(eq(filasAtendimento.corretorId, corretorId));
+  for (const f of filas) {
+    const [m] = await db.select({ max: sql<number>`coalesce(max(${filasAtendimento.posicao}), 0)` }).from(filasAtendimento)
+      .where(f.roletaId ? eq(filasAtendimento.roletaId, f.roletaId) : eq(filasAtendimento.imobiliariaId, f.imobiliariaId));
+    await db.update(filasAtendimento).set({ posicao: Number(m.max) + 1, ativoNoTurno: true }).where(eq(filasAtendimento.id, f.id));
+  }
+  return ate;
+}
 /** Segunda-feira da semana (YYYY-MM-DD) — as advertências zeram quando a semana vira. */
 export function inicioSemana(d = new Date()) {
   const s = sp(d);
@@ -42,15 +59,16 @@ export function inicioSemana(d = new Date()) {
 }
 
 /** Ligar o "disponível na roleta" (v1 entrar_na_roleta). Devolve se entrou no turno e as advertências. */
-export async function entrarNaRoleta(corretorId: string, agora = new Date()) {
+export async function entrarNaRoleta(corretorId: string, agora = new Date(), ligadoPelaGestao = false) {
   const [p] = await db.select().from(perfis).where(eq(perfis.id, corretorId)).limit(1);
   if (!p) throw new Error('Corretor não encontrado');
   const semana = inicioSemana(agora);
   let advertencias = p.advertenciaSemanaInicio === semana ? p.advertenciasSemana : 0;
-  const atrasado = sp(agora).min > 14 * 60;
+  // a advertência é pra quem se liga atrasado; se foi o dono/gerente que colocou, não conta
+  const atrasado = !ligadoPelaGestao && sp(agora).min > 14 * 60;
   if (atrasado) advertencias += 1;
   const ativo = !atrasado && advertencias < 3;
-  await db.update(perfis).set({ emPlantao: true, advertenciasSemana: advertencias, advertenciaSemanaInicio: semana }).where(eq(perfis.id, corretorId));
+  await db.update(perfis).set({ emPlantao: true, checkinEm: agora, advertenciasSemana: advertencias, advertenciaSemanaInicio: semana }).where(eq(perfis.id, corretorId));
   // em todas as roletas de que participa: entrou no turno → vai pro fim da fila; atrasado → fica de fora do turno
   const filas = await db.select().from(filasAtendimento).where(eq(filasAtendimento.corretorId, corretorId));
   for (const f of filas) {
@@ -67,7 +85,8 @@ export async function entrarNaRoleta(corretorId: string, agora = new Date()) {
 
 /** Escolhe e trava o próximo da fila da roleta (o 1º elegível vai pro fim). */
 export async function proximoDaFilaOka(roletaId: string, agora = new Date()): Promise<string | null> {
-  if (!expedienteAberto(agora)) return null;
+  // fora do expediente só recebe quem o dono liberou (até o fim do dia)
+  const foraDoExpediente = !expedienteAberto(agora);
   const semana = inicioSemana(agora);
   return db.transaction(async tx => {
     await tx.execute(sql`select id from roletas where id = ${roletaId} for update`);
@@ -77,6 +96,7 @@ export async function proximoDaFilaOka(roletaId: string, agora = new Date()): Pr
         eq(filasAtendimento.roletaId, roletaId), eq(filasAtendimento.ativoNoTurno, true),
         eq(perfis.emPlantao, true), eq(perfis.emAlmoco, false), eq(perfis.bloqueado, false), isNull(perfis.removidoEm),
         sql`(${perfis.advertenciaSemanaInicio} is distinct from ${semana} or ${perfis.advertenciasSemana} < 3)`,
+        foraDoExpediente ? gt(perfis.plantaoLiberadoAte, agora) : undefined,
       ))
       .orderBy(asc(filasAtendimento.posicao)).limit(1);
     if (!c) return null;
@@ -89,13 +109,26 @@ export async function proximoDaFilaOka(roletaId: string, agora = new Date()): Pr
 let ultimoCorte = '';
 /** No horário de fechamento, desliga o "disponível" de todo mundo (v1 auto_offline_fim_de_expediente). */
 export async function desligarFimDeExpediente(io: SocketServer, agora = new Date()) {
+  // liberação do dono venceu (virou o dia): sai da roleta mesmo com o expediente "aberto" de madrugada
+  const vencidos = await db.update(perfis).set({ emPlantao: false, plantaoLiberadoAte: null })
+    .where(and(eq(perfis.emPlantao, true), isNotNull(perfis.plantaoLiberadoAte), lte(perfis.plantaoLiberadoAte, agora)))
+    .returning({ id: perfis.id, imobiliariaId: perfis.imobiliariaId });
+  for (const p of vencidos) {
+    io.to('imobiliaria:' + p.imobiliariaId).emit('fila:atualizada', { corretorId: p.id, emPlantao: false });
+    io.to('imobiliaria:' + p.imobiliariaId).emit('roletas:mudou', {});
+  }
   if (expedienteAberto(agora)) return;
   const chave = agora.toISOString().slice(0, 16);
   if (chave === ultimoCorte) return;
   ultimoCorte = chave;
-  const desligados = await db.update(perfis).set({ emPlantao: false }).where(eq(perfis.emPlantao, true))
+  // quem o dono liberou fora do expediente continua (até a liberação vencer)
+  const desligados = await db.update(perfis).set({ emPlantao: false, plantaoLiberadoAte: null })
+    .where(and(eq(perfis.emPlantao, true), sql`(${perfis.plantaoLiberadoAte} is null or ${perfis.plantaoLiberadoAte} <= ${agora.toISOString()}::timestamptz)`))
     .returning({ id: perfis.id, imobiliariaId: perfis.imobiliariaId });
-  for (const p of desligados) io.to('imobiliaria:' + p.imobiliariaId).emit('fila:atualizada', { corretorId: p.id, emPlantao: false });
+  for (const p of desligados) {
+    io.to('imobiliaria:' + p.imobiliariaId).emit('fila:atualizada', { corretorId: p.id, emPlantao: false });
+    io.to('imobiliaria:' + p.imobiliariaId).emit('roletas:mudou', {});
+  }
 }
 
 /** SLA de 5 min (v1 reassign_overdue_leads): lead em LEAD NOVO, com corretor, sem nenhum contato. */

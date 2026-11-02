@@ -1,8 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowUp, ArrowDown, X, Trash2 } from 'lucide-react';
+import { ArrowUp, ArrowDown, X, Trash2, GripVertical, Clock, CheckCircle2, Power } from 'lucide-react';
 import { useAppStore, type RemoteRoleta, type RoletaFinalidade } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { ini } from '../lib/format';
 
 const CANAIS = ['WhatsApp', 'Facebook', 'Instagram', 'Site', 'Indicacao', 'Manual'];
 const FINAL_LABEL: Record<RoletaFinalidade, string> = { venda: 'Só venda', locacao: 'Só locação', ambos: 'Venda e locação' };
@@ -92,7 +91,7 @@ export default function Roleta() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 460px), 1fr))', gap: 14, alignItems: 'start' }}>
         {minhas.map(r => (
           <RoletaCard
             key={r.id} roleta={r} isManager={isManager} meNome={meNome} corretores={corretores} filaFixa={filaFixa}
@@ -119,6 +118,10 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
 }) {
   const [expand, setExpand] = useState(false);
   const toggleAlmoco = useAppStore(s => s.toggleAlmoco);
+  const alternarPlantao = useAppStore(s => s.alternarPlantao);
+  const isDono = useAppStore(s => s.me?.role === 'dono');
+  const [arrastando, setArrastando] = useState<number | null>(null);
+  const [sobre, setSobre] = useState<number | null>(null);
   const membros = [...roleta.membros].sort((a, b) => a.posicao - b.posicao);
   // Fila fixa: o próximo é quem vem depois de quem recebeu por último (mesma conta do servidor).
   const ultimoIdx = filaFixa ? membros.findIndex(m => m.corretorId === roleta.ultimoCorretorId) : -1;
@@ -133,6 +136,16 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
     if (j < 0 || j >= membros.length) return;
     const ids = membros.map(m => m.corretorId);
     [ids[i], ids[j]] = [ids[j], ids[i]];
+    onMembros(ids);
+  };
+
+  // arrastar e soltar: tira da posição antiga e coloca na nova
+  const soltar = (destino: number) => {
+    if (arrastando === null || arrastando === destino) { setArrastando(null); setSobre(null); return; }
+    const ids = membros.map(m => m.corretorId);
+    const [movido] = ids.splice(arrastando, 1);
+    ids.splice(destino, 0, movido);
+    setArrastando(null); setSobre(null);
     onMembros(ids);
   };
 
@@ -215,32 +228,83 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
         </div>
       )}
 
-      <div style={{ padding: '8px 8px 10px' }}>
-        {membros.map((m, i) => (
-          <div key={m.corretorId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 8px', borderRadius: 8, opacity: ativo(m) ? 1 : 0.5, background: m.nome === meNome ? 'var(--bg)' : 'transparent' }}>
-            <span style={{ fontFamily: 'Newsreader,serif', fontSize: 15, width: 18, color: 'var(--muted)' }}>{i + 1}</span>
-            <span style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--terraSoft)', color: 'var(--terra)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700, flex: 'none' }}>{ini(m.nome)}</span>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.nome}</span>
-            {i === proximoIdx && <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--terra)', background: 'var(--terraSoft)', padding: '3px 7px', borderRadius: 20 }}>próximo</span>}
-            {i === ultimoIdx && i !== proximoIdx && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>recebeu o último</span>}
-            {filaFixa
-              ? m.bloqueado && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>bloqueado</span>
-              : !m.emPlantao ? <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>fora</span>
-              : m.emAlmoco ? <span style={{ fontSize: 10.5, color: 'var(--terra)' }}>almoço</span>
-              : m.ativoNoTurno === false ? <span style={{ fontSize: 10.5, color: 'var(--terra)' }}>fora do turno</span> : null}
-            {!!m.advertencias && <span title="Advertências na semana (3 tiram da roleta)" style={{ fontSize: 10.5, fontWeight: 700, color: m.advertencias >= 3 ? '#DC2626' : 'var(--terra)' }}>⚠ {m.advertencias}</span>}
-            {!filaFixa && m.emPlantao && (isManager || m.nome === meNome) && (
-              <button onClick={() => toggleAlmoco(m.corretorId)} title={m.emAlmoco ? 'Voltar do almoço' : 'Sair pro almoço'} style={{ border: '1px solid var(--line)', background: 'none', borderRadius: 6, fontSize: 10.5, padding: '2px 7px', color: 'var(--muted)' }}>{m.emAlmoco ? 'voltei' : 'almoço'}</button>
-            )}
-            {isManager && (
-              <>
-                <button onClick={() => mover(i, -1)} disabled={i === 0} style={{ border: 'none', background: 'none', color: 'var(--muted)', opacity: i === 0 ? 0.3 : 1 }}><ArrowUp size={13} /></button>
-                <button onClick={() => mover(i, 1)} disabled={i === membros.length - 1} style={{ border: 'none', background: 'none', color: 'var(--muted)', opacity: i === membros.length - 1 ? 0.3 : 1 }}><ArrowDown size={13} /></button>
-                <button onClick={() => onMembros(membros.filter(x => x.corretorId !== m.corretorId).map(x => x.corretorId))} style={{ border: 'none', background: 'none', color: 'var(--terra)' }}><X size={13} /></button>
-              </>
-            )}
-          </div>
-        ))}
+      <div style={{ padding: '12px 14px 14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, margin: '0 2px 10px' }}>
+          <span style={rotuloLista}>Ordem de prioridade</span>
+          {isManager && membros.length > 1 && <span style={{ ...rotuloLista, display: 'flex', alignItems: 'center', gap: 4 }}><GripVertical size={11} /> arraste para reordenar</span>}
+        </div>
+        {!filaFixa && !expedienteRoletaAberto() && (
+          <p style={{ fontSize: 11.5, color: 'var(--terra)', background: 'var(--terraSoft)', borderRadius: 8, padding: '7px 10px', margin: '0 0 10px' }}>
+            Expediente encerrado. {isDono ? 'Você pode colocar um corretor online mesmo assim: ele recebe leads até a meia-noite.' : 'Só o dono pode colocar alguém online agora.'}
+          </p>
+        )}
+        <div style={{ display: 'grid', gap: 8 }}>
+          {membros.map((m, i) => {
+            const online = ativo(m);
+            const podeAlternar = isManager && !filaFixa && !m.bloqueado;
+            return (
+              <div key={m.corretorId}
+                draggable={isManager}
+                onDragStart={e => { setArrastando(i); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragOver={e => { if (arrastando !== null) { e.preventDefault(); setSobre(i); } }}
+                onDragLeave={() => setSobre(x => (x === i ? null : x))}
+                onDrop={e => { e.preventDefault(); soltar(i); }}
+                onDragEnd={() => { setArrastando(null); setSobre(null); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 11,
+                  border: '1px solid ' + ((sobre === i && arrastando !== i) || m.nome === meNome ? 'var(--terra)' : 'var(--line)'),
+                  background: 'var(--card)', opacity: arrastando === i ? 0.4 : 1,
+                  boxShadow: sobre === i && arrastando !== i ? '0 0 0 3px var(--terraSoft)' : 'none', transition: 'box-shadow .12s, border-color .12s',
+                }}>
+                {isManager && <span title="Arraste para reordenar" style={{ cursor: 'grab', color: 'var(--muted)', display: 'flex', flex: 'none' }}><GripVertical size={15} /></span>}
+                <span style={{ width: 34, height: 34, borderRadius: '50%', background: online ? 'var(--terraSoft)' : 'var(--bg)', color: online ? 'var(--terra)' : 'var(--muted)', display: 'grid', placeItems: 'center', fontFamily: 'Newsreader,serif', fontSize: 17, flex: 'none' }}>{i + 1}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: online ? 'var(--ink)' : 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{m.nome}</span>
+                    {i === proximoIdx && <span style={etiqueta('var(--terra)', 'var(--terraSoft)')}>próximo</span>}
+                    {i === ultimoIdx && i !== proximoIdx && <span style={etiqueta('var(--muted)', 'var(--bg)')}>recebeu o último</span>}
+                    {m.bloqueado && <span style={etiqueta('var(--muted)', 'var(--bg)')}>bloqueado</span>}
+                    {!filaFixa && m.emPlantao && m.emAlmoco && <span style={etiqueta('var(--terra)', 'var(--terraSoft)')}>almoço</span>}
+                    {!filaFixa && m.emPlantao && m.ativoNoTurno === false && <span style={etiqueta('var(--terra)', 'var(--terraSoft)')}>fora do turno</span>}
+                    {!filaFixa && m.emPlantao && m.liberadoForaHorario && <span title="O dono colocou online fora do expediente — vale até a meia-noite" style={etiqueta('var(--olive)', 'var(--oliveSoft)')}>liberado pelo dono</span>}
+                    {!!m.advertencias && <span title="Advertências na semana (3 tiram da roleta)" style={etiqueta(m.advertencias >= 3 ? '#DC2626' : 'var(--terra)', 'var(--terraSoft)')}>⚠ {m.advertencias}</span>}
+                  </div>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, fontSize: 10.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+                    <Clock size={11} /> {m.checkinEm ? 'Check-in: ' + quandoCheckin(m.checkinEm) : 'Sem check-in ainda'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flex: 'none' }}>
+                  <span style={rotuloLista}>Status roleta</span>
+                  <button
+                    onClick={podeAlternar ? () => alternarPlantao(m.corretorId) : undefined}
+                    disabled={!podeAlternar}
+                    title={podeAlternar ? (online ? 'Tirar da roleta' : !expedienteRoletaAberto() && isDono ? 'Colocar online fora do horário (até a meia-noite)' : 'Colocar online') : undefined}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: '.08em',
+                      border: '1px solid ' + (online ? 'transparent' : 'var(--line)'), cursor: podeAlternar ? 'pointer' : 'default',
+                      background: online ? 'var(--oliveSoft)' : 'var(--bg)', color: online ? 'var(--olive)' : 'var(--muted)',
+                    }}>
+                    {online ? <CheckCircle2 size={12} /> : <Power size={12} />} {online ? 'ONLINE' : 'OFFLINE'}
+                  </button>
+                  {(isManager || m.nome === meNome) && (
+                    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                      {!filaFixa && m.emPlantao && (
+                        <button onClick={() => toggleAlmoco(m.corretorId)} title={m.emAlmoco ? 'Voltar do almoço' : 'Sair pro almoço'} style={{ border: '1px solid var(--line)', background: 'none', borderRadius: 6, fontSize: 10.5, padding: '2px 7px', color: 'var(--muted)', marginRight: 2 }}>{m.emAlmoco ? 'voltei' : 'almoço'}</button>
+                      )}
+                      {isManager && (
+                        <>
+                          <button onClick={() => mover(i, -1)} disabled={i === 0} title="Subir" style={{ ...icone, opacity: i === 0 ? 0.3 : 1 }}><ArrowUp size={13} /></button>
+                          <button onClick={() => mover(i, 1)} disabled={i === membros.length - 1} title="Descer" style={{ ...icone, opacity: i === membros.length - 1 ? 0.3 : 1 }}><ArrowDown size={13} /></button>
+                          <button onClick={() => onMembros(membros.filter(x => x.corretorId !== m.corretorId).map(x => x.corretorId))} title="Tirar desta roleta" style={{ ...icone, color: 'var(--terra)' }}><X size={13} /></button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
         {membros.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)', padding: '8px' }}>Sem corretores nesta roleta.</p>}
         {isManager && naoMembros.length > 0 && (
           <div style={{ padding: '8px 8px 0' }}>
@@ -253,4 +317,24 @@ function RoletaCard({ roleta, isManager, meNome, corretores, filaFixa, sessoes, 
       </div>
     </div>
   );
+}
+
+const rotuloLista: React.CSSProperties = { fontSize: 9.5, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)' };
+const icone: React.CSSProperties = { border: 'none', background: 'none', color: 'var(--muted)', padding: 3, display: 'flex' };
+const etiqueta = (cor: string, fundo: string): React.CSSProperties => ({ fontSize: 9.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: cor, background: fundo, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' });
+
+/** Expediente da roleta (mesma regra do servidor): seg–sex até 18:20, quinta até 19:30, sábado até 15:20, domingo fechado. */
+function expedienteRoletaAberto(agora = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(agora).map(x => [x.type, x.value]));
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
+  if (dow === 0) return false;
+  const min = (Number(p.hour) % 24) * 60 + Number(p.minute);
+  return min < (dow === 4 ? 19 * 60 + 30 : dow === 6 ? 15 * 60 + 20 : 18 * 60 + 20);
+}
+/** Check-in de hoje mostra só a hora; de outro dia, a data também (igual à v1). */
+function quandoCheckin(iso: string) {
+  const d = new Date(iso);
+  const dia = (x: Date) => x.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const hora = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+  return dia(d) === dia(new Date()) ? hora : d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }) + ' às ' + hora;
 }

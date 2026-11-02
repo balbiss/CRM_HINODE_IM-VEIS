@@ -23,7 +23,7 @@ export interface SessaoWhatsapp {
 export interface NumeroCentral { id: string; rotulo: string | null; numero: string | null }
 
 export type RoletaFinalidade = 'venda' | 'locacao' | 'ambos';
-export interface RoletaMembro { corretorId: string; nome: string; posicao: number; emPlantao: boolean; bloqueado: boolean; emAlmoco?: boolean; ativoNoTurno?: boolean; advertencias?: number }
+export interface RoletaMembro { corretorId: string; nome: string; posicao: number; emPlantao: boolean; bloqueado: boolean; emAlmoco?: boolean; ativoNoTurno?: boolean; advertencias?: number; checkinEm?: string | null; liberadoForaHorario?: boolean }
 export interface RemoteRoleta {
   id: string; nome: string; ativa: boolean; ordem: number; padrao: boolean;
   canais: string[]; finalidade: RoletaFinalidade; sessaoWhatsappId: string | null; ultimoCorretorId?: string | null; numeroPrimeiroContatoId?: string | null;
@@ -353,6 +353,8 @@ interface AppState {
   alertasModal: RemoteNotificacao[];
   fecharAlertaModal: (id: string) => void;
   toggleAlmoco: (corretorId: string) => Promise<void>;
+  /** Dono/gerente liga ou desliga um corretor da roleta (o dono também fora do expediente). */
+  alternarPlantao: (corretorId: string) => Promise<void>;
   compromissos: Compromisso[];
   fetchCompromissos: () => Promise<void>;
   salvarCompromisso: (dados: Partial<Compromisso> & { titulo: string; inicio: string }, id?: string) => Promise<boolean>;
@@ -929,6 +931,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { await apiFetch('/api/compromissos/' + id, token, { method: 'DELETE' }); await get().fetchCompromissos(); get().toast('Compromisso cancelado'); }
     catch (e) { get().toast((e as ApiError).message || 'Não foi possível cancelar'); }
   },
+  alternarPlantao: async corretorId => {
+    const token = get().token;
+    if (!token) return;
+    try {
+      const r = await apiFetch<{ corretorId: string; emPlantao: boolean; aviso?: string | null }>('/api/filas/disponibilidade', token, { method: 'PATCH', body: JSON.stringify({ corretorId }) });
+      const nome = get().perfisRemotos.find(p => p.id === corretorId)?.nome ?? 'Corretor';
+      set(s => ({ fila: s.fila.map(f => (f.corretorId === corretorId ? { ...f, ativo: r.emPlantao } : f)) }));
+      get().toast(r.aviso || nome + (r.emPlantao ? ' está online na roleta' : ' saiu da roleta'));
+      await get().fetchRoletas();
+    } catch (e) { get().toast((e as ApiError).message || 'Não foi possível mudar o status na roleta'); }
+  },
   toggleAlmoco: async corretorId => {
     const token = get().token;
     if (!token) return;
@@ -1441,11 +1454,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   enforceHorarioComercial: meNome => {
     if (isBusinessHoursOpen(get().horarioAtendimento)) return;
+    // quem o dono colocou online fora do expediente continua (o servidor desliga quando vencer)
+    const liberados = new Set(get().roletas.flatMap(r => r.membros.filter(m => m.liberadoForaHorario).map(m => m.corretorId)));
     const me = get().fila.find(f => f.nome === meNome);
-    const algumOnline = get().fila.some(f => f.ativo);
+    const algumOnline = get().fila.some(f => f.ativo && !liberados.has(f.corretorId));
     if (!algumOnline) return;
-    set(s => ({ fila: s.fila.map(f => (f.ativo ? { ...f, ativo: false } : f)) }));
-    if (me?.ativo) {
+    set(s => ({ fila: s.fila.map(f => (f.ativo && !liberados.has(f.corretorId) ? { ...f, ativo: false } : f)) }));
+    if (me?.ativo && !liberados.has(me.corretorId)) {
       get().toast('Você saiu da roleta automaticamente — fim do expediente');
       const token = get().token;
       if (token) apiFetch('/api/filas/disponibilidade', token, { method: 'PATCH', body: JSON.stringify({ corretorId: me.corretorId }) }).catch(() => {});

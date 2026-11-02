@@ -27,6 +27,7 @@ export function roletasRouter(io: SocketServer) {
       posicao: filasAtendimento.posicao, ultimaAtribuicao: filasAtendimento.ultimaAtribuicao,
       nome: perfis.nome, emPlantao: perfis.emPlantao, bloqueado: perfis.bloqueado,
       emAlmoco: perfis.emAlmoco, advertencias: perfis.advertenciasSemana, advSemana: perfis.advertenciaSemanaInicio, ativoNoTurno: filasAtendimento.ativoNoTurno,
+      checkinEm: perfis.checkinEm, plantaoLiberadoAte: perfis.plantaoLiberadoAte,
     }).from(filasAtendimento)
       .innerJoin(perfis, eq(perfis.id, filasAtendimento.corretorId))
       .where(eq(filasAtendimento.imobiliariaId, imobiliariaId))
@@ -39,6 +40,7 @@ export function roletasRouter(io: SocketServer) {
       membros: membros.filter(m => m.roletaId === r.id).map(m => ({
         corretorId: m.corretorId, nome: m.nome, posicao: m.posicao, emPlantao: m.emPlantao, bloqueado: m.bloqueado,
         emAlmoco: m.emAlmoco, ativoNoTurno: m.ativoNoTurno, advertencias: m.advSemana === inicioSemana() ? m.advertencias : 0,
+        checkinEm: m.checkinEm, liberadoForaHorario: !!m.plantaoLiberadoAte && m.plantaoLiberadoAte > new Date(),
       })),
     })));
   });

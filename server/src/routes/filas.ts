@@ -8,7 +8,7 @@ import { desc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { isBusinessHoursOpen, horarioAtendimentoLabel } from '../lib/schedule.js';
 import { distribuirPendentes, garantirRoletaPadrao } from '../lib/roleta.js';
-import { entrarNaRoleta, expedienteAberto, HORARIO_ROLETA, estadoRoleta } from '../lib/roletaOka.js';
+import { entrarNaRoleta, expedienteAberto, HORARIO_ROLETA, estadoRoleta, liberarForaDoExpediente } from '../lib/roletaOka.js';
 import type { Server as SocketServer } from 'socket.io';
 
 export function filasRouter(io: SocketServer) {
@@ -95,10 +95,14 @@ export function filasRouter(io: SocketServer) {
     if (!alvo) return res.status(404).json({ error: 'Corretor não encontrado' });
 
     const vaiLigar = !alvo.emPlantao;
+    // Fora do expediente só o DONO liga alguém (pedido do dono, 11/2026) — vale até o fim do dia.
+    const liberacaoDoDono = vaiLigar && !expedienteAberto() && role === 'dono';
     if (vaiLigar) {
       if (alvo.bloqueado) return res.status(403).json({ error: alvo.nome + ' está com acesso bloqueado — não pode entrar na roleta' });
       // v1: fora do expediente da roleta não dá pra ficar disponível
-      if (!expedienteAberto()) return res.status(403).json({ error: HORARIO_ROLETA });
+      if (!expedienteAberto() && !liberacaoDoDono) {
+        return res.status(403).json({ error: HORARIO_ROLETA + ' Fora desse horário, só o dono pode colocar um corretor online.' });
+      }
 
       // Se o corretor não participa de NENHUMA roleta, entra na padrão (senão ficar online não
       // adianta nada). Se já é membro de alguma, respeita o que o gerente configurou.
@@ -115,12 +119,16 @@ export function filasRouter(io: SocketServer) {
 
     // v1 entrar_na_roleta: depois das 14h dá advertência e não entra no turno; 3 na semana tira da roleta
     let aviso: string | null = null;
-    if (vaiLigar) {
-      const r = await entrarNaRoleta(parsed.data.corretorId);
+    if (liberacaoDoDono) {
+      // sem advertência de "depois das 14h": foi o dono que decidiu
+      await liberarForaDoExpediente(parsed.data.corretorId);
+      aviso = alvo.nome + ' está online fora do expediente — recebe leads até a meia-noite ou até alguém desligar.';
+    } else if (vaiLigar) {
+      const r = await entrarNaRoleta(parsed.data.corretorId, new Date(), role !== 'corretor' && parsed.data.corretorId !== sub);
       if (r.atrasado) aviso = 'Entrou depois das 14h: advertência registrada (' + r.advertencias + ' na semana) e fica fora do turno de hoje.';
       else if (!r.ativo) aviso = '3 advertências na semana — fora da roleta até a semana virar.';
     } else {
-      await db.update(perfis).set({ emPlantao: false }).where(eq(perfis.id, parsed.data.corretorId));
+      await db.update(perfis).set({ emPlantao: false, plantaoLiberadoAte: null }).where(eq(perfis.id, parsed.data.corretorId));
     }
     const [row] = await db.select().from(perfis).where(eq(perfis.id, parsed.data.corretorId)).limit(1);
 

@@ -149,6 +149,11 @@ export const perfis = pgTable('perfis', {
   okaId: uuid('oka_id'),
   avatarUrl: text('avatar_url'),
   emAlmoco: boolean('em_almoco').notNull().default(false),
+  // Hora em que ficou online na roleta pela última vez ("check-in" da tela Roleta, igual à v1).
+  checkinEm: timestamp('checkin_em', { withTimezone: true }),
+  // Dono ligou o corretor FORA do expediente: vale até o fim desse dia — o desligamento automático
+  // não derruba e a roleta entrega lead só pra quem está liberado. Desligar limpa.
+  plantaoLiberadoAte: timestamp('plantao_liberado_ate', { withTimezone: true }),
   advertenciasSemana: integer('advertencias_semana').notNull().default(0),
   advertenciaSemanaInicio: date('advertencia_semana_inicio', { mode: 'string' }),
   ultimoLeadRecebidoEm: timestamp('ultimo_lead_recebido_em', { withTimezone: true }),
