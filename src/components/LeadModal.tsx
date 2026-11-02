@@ -14,6 +14,7 @@ import { AudioRecordButton } from './AudioRecordButton';
 import { EmojiPicker } from './EmojiPicker';
 import { AvisoJanelaOficial } from './WhatsappOficial';
 import { LeadDetalhesOka } from './LeadDetalhesOka';
+import { CriativoDoLead } from './CriativoDoLead';
 import { MensagensProntas } from './MensagensProntas';
 
 const TABS: Array<[string, string]> = [
@@ -131,6 +132,7 @@ export function LeadModal() {
         <div ref={chatScrollRef} className={leadTab === 'chat' ? 'chat-fundo' : undefined} style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           {leadTab === 'detalhes' && (
             <>
+              <CriativoDoLead leadId={L.id} campanha={L.campanha} />
               <LeadDetalhesOka lead={L} />
               {L.iaResumo && (
                 <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid #0F5E57', borderRadius: 10, background: 'var(--card)' }}>

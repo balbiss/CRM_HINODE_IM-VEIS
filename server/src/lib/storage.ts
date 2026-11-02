@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, HeadBucketCommand, CreateBucketCommand, PutBucketPolicyCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadBucketCommand, CreateBucketCommand, PutBucketPolicyCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const bucket = process.env.MINIO_BUCKET || 'hinode-imoveis';
 
@@ -34,4 +34,15 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
   await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
   const publicBase = process.env.MINIO_PUBLIC_URL || (process.env.MINIO_ENDPOINT + '/' + bucket);
   return publicBase.replace(/\/$/, '') + '/' + key;
+}
+
+/** Endereço público de um arquivo já guardado no bucket. */
+export function urlPublica(key: string): string {
+  const publicBase = process.env.MINIO_PUBLIC_URL || (process.env.MINIO_ENDPOINT + '/' + bucket);
+  return publicBase.replace(/\/$/, '') + '/' + key;
+}
+
+/** O arquivo já existe no bucket? (não baixa nada) */
+export async function existeArquivo(key: string): Promise<boolean> {
+  try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key })); return true; } catch { return false; }
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "imobiliarias" ADD COLUMN "criativos_pasta_url" text;

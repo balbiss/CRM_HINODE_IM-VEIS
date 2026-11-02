@@ -72,6 +72,9 @@ export const imobiliarias = pgTable('imobiliarias', {
   diasCarencia: integer('dias_carencia').notNull().default(5),
   // Quantas rebatidas cada corretor pode puxar do bolsão por dia (0 = ilimitado).
   limiteRebatidasDia: integer('limite_rebatidas_dia').notNull().default(5),
+  // Pasta do Google Drive com os criativos dos anúncios (compartilhada "qualquer pessoa com o link").
+  // O CRM lê os nomes dos arquivos e mostra no card o criativo do anúncio que trouxe o lead.
+  criativosPastaUrl: text('criativos_pasta_url'),
   // v1: liga/desliga, pra imobiliária inteira, o disparo automático de follow-up (fluxo Geral / da campanha).
   followupAutomaticoAtivo: boolean('followup_automatico_ativo').notNull().default(false),
   observacoes: text('observacoes'),

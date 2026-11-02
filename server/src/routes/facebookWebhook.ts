@@ -80,7 +80,9 @@ async function receberLead(io: SocketServer, conexao: typeof integracoesFacebook
       nome: c.nome,
       telefone: c.telefone,
       email: c.email,
-      campanha: lead.campaign_name || lead.ad_name || 'Formulário Facebook',
+      // nome do ANÚNCIO primeiro (igual à v1): é o que casa com o criativo da pasta do Drive e
+      // separa os relatórios por anúncio; sem anúncio, o nome da campanha
+      campanha: lead.ad_name || lead.campaign_name || 'Formulário Facebook',
       canal: 'Facebook',
       finalidade: normalizarFinalidade(c.finalidade),
       fbLeadId: leadgenId,

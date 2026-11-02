@@ -380,3 +380,17 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
 - **Meu perfil** (`components/MeuPerfil.tsx`): qualquer papel troca a própria senha clicando no nome (barra lateral) ou
   em "Meu perfil e senha" no menu do topo. "Ajustes" some do menu do topo pra corretor (já era só gestão).
 - Kanban usa o mesmo avatar por origem do card (`ChatAvatar` com `canal`); `LeadAvatar` removido.
+
+## 2026-11-02 — Criativos dos anúncios a partir do Google Drive
+
+- `imobiliarias.criativos_pasta_url` (migração 0053). Tela Campanhas → "Pasta de criativos no Google Drive" (dono/gerente).
+- `lib/criativos.ts`: lê a pasta pública pela listagem `drive.google.com/embeddedfolderview` (sem login nem chave de API),
+  com subpastas (3 níveis, 800 arquivos), cache 10 min. Casa lead ↔ arquivo pelo nome do anúncio: sem acento/espaço/
+  extensão, tira `Importação (ID: …)`, o que vem depois de `|` e ` - AD3`; igual, ou o arquivo mais longo que é começo do nome.
+  Teste com a pasta real da Hinode: 104 arquivos, 92% dos leads dos últimos 30 dias com criativo.
+- Miniaturas: o Google responde 429 quando o navegador pede várias a partir de outro site → o servidor baixa uma vez e
+  guarda no MinIO (`criativos/<id>.jpg`); a tela usa `GET /api/criativos/miniatura/:id` (público, só ids das pastas conectadas).
+  Vídeo toca no player do Drive (`/file/d/<id>/preview`).
+- Robô: toda meia-noite (Brasília) e 2 min após o boot relê as pastas e guarda as miniaturas novas.
+- `GET /api/criativos/lead/:id` (bloco "Anúncio que trouxe esse lead" no card), `POST /api/criativos/casar` (Campanhas).
+- Facebook: `campanha` do lead passou a ser o NOME DO ANÚNCIO (`ad_name || campaign_name`), igual à v1.
