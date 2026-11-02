@@ -96,6 +96,31 @@ export default function Campanhas() {
         </div>
       )}
 
+      {/* OBS pro dono: o nome do arquivo no Drive tem que ser igual ao nome do anúncio na Meta */}
+      {isManager && (
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '14px 16px', marginBottom: 16, border: '1px solid #E0B44A', borderLeft: '4px solid #D99A1E', borderRadius: 12, background: 'rgba(233,178,64,.12)' }}>
+          <span style={{ fontSize: 18, lineHeight: 1, flex: 'none' }}>⚠️</span>
+          <div style={{ minWidth: 0, fontSize: 13, lineHeight: 1.55 }}>
+            <p style={{ margin: 0, fontWeight: 800, letterSpacing: '.02em' }}>OBS: o nome do arquivo no Drive tem que ser IGUAL ao nome do anúncio no Gerenciador de Anúncios da Meta</p>
+            <p style={{ margin: '4px 0 0', color: 'var(--ink)' }}>
+              É assim que o CRM descobre qual criativo trouxe cada lead. Exemplo: anúncio <b>[CN 38] [SETE SÓIS]</b> na Meta → arquivo <b>[CN 38] [SETE SÓIS].png</b> (ou .mp4) no Drive.
+              Acento, letra maiúscula/minúscula e espaços não atrapalham — o que importa são as palavras e os números.
+            </p>
+            {(() => {
+              const faltando = visiveis.filter(c => !criativoManual(c.driveUrl) && !casados[c.nome]?.length && !/^(whatsapp|manual|site|importa)/i.test(c.nome.trim())).map(c => c.nome);
+              if (!config?.pastaUrl || !faltando.length) return null;
+              return (
+                <p style={{ margin: '8px 0 0', color: 'var(--ink)' }}>
+                  <b>Anúncios sem criativo na pasta ({faltando.length}):</b>{' '}
+                  {faltando.slice(0, 8).map((n, i) => <span key={n}>{i ? ' · ' : ''}<code style={{ fontSize: 12, background: 'var(--card)', padding: '1px 6px', borderRadius: 5, border: '1px solid var(--line)' }}>{n}</code></span>)}
+                  {faltando.length > 8 ? ` e mais ${faltando.length - 8}` : ''} — suba o arquivo com esse nome que ele aparece sozinho.
+                </p>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: 14 }}>
         {visiveis.map(c => {
           const manual = criativoManual(c.driveUrl);
