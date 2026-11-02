@@ -1,6 +1,5 @@
 import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useState } from 'react';
-import { Flame, Snowflake, Star, Sun } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { STATUS_VISITA, type Lead } from '../lib/data';
@@ -80,22 +79,7 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, alignItems: 'center' }}>
-        {([['quente', 'Quente', Flame, '#DC2626'], ['morno', 'Morno', Sun, '#D97706'], ['frio', 'Frio', Snowflake, '#2563EB']] as const).map(([v, rot, Icone, cor]) => (
-          <button
-            key={v}
-            onClick={() => salvar('temperatura', L.temperatura === v ? null : v, L.temperatura)}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px 0', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
-              border: '1px solid ' + (L.temperatura === v ? cor : 'var(--line)'), background: L.temperatura === v ? cor : 'none', color: L.temperatura === v ? '#fff' : 'var(--muted)' }}
-          >
-            <Icone size={14} /> {rot}
-          </button>
-        ))}
-        <button title={L.favorito ? 'Tirar dos favoritos' : 'Favoritar'} onClick={() => salvar('favorito', !L.favorito, L.favorito)} style={{ width: 40, height: 37, border: '1px solid var(--line)', borderRadius: 8, background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Star size={16} fill={L.favorito ? '#EAB308' : 'none'} color={L.favorito ? '#CA8A04' : 'var(--muted)'} />
-        </button>
-      </div>
-
+      {/* Temperatura (Quente/Morno/Frio) e favorito saíram do card a pedido do dono (11/2026). */}
       {/* Blocos sem título, um de cada cor (pedido do dono, 11/2026): azul claro / branco alternados
           pro corretor achar cada assunto de olho — contato, follow-up/visita, funil, financeiro, ações, documentos. */}
       <div style={{ display: 'grid', gap: 10 }}>
