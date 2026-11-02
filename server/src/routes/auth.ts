@@ -39,7 +39,7 @@ authRouter.post('/login', async (req, res) => {
   const token = signToken({ sub: perfil.id, imobiliariaId: perfil.imobiliariaId, role: perfil.role, nome: perfil.nome });
   res.json({
     token,
-    perfil: { id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao },
+    perfil: { id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, senhaProvisoria: perfil.senhaProvisoria },
   });
 });
 
@@ -75,7 +75,7 @@ authRouter.post('/esqueci-senha', async (req, res) => {
 authRouter.get('/me', requireAuth, async (req, res) => {
   const [perfil] = await db.select().from(perfis).where(eq(perfis.id, req.auth!.sub)).limit(1);
   if (!perfil) return res.status(404).json({ error: 'Perfil não encontrado' });
-  res.json({ id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, telefone: perfil.telefone });
+  res.json({ id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, telefone: perfil.telefone, senhaProvisoria: perfil.senhaProvisoria });
 });
 
 // Ajustes → Perfil: a própria pessoa edita nome, e-mail (é o login) e telefone.
@@ -114,7 +114,9 @@ authRouter.patch('/senha', requireAuth, async (req, res) => {
   const ok = await bcrypt.compare(parsed.data.senhaAtual, perfil.senhaHash);
   if (!ok) return res.status(401).json({ error: 'Senha atual incorreta' });
 
+  if (parsed.data.senhaNova === parsed.data.senhaAtual) return res.status(400).json({ error: 'A senha nova precisa ser diferente da atual' });
   const senhaHash = await bcrypt.hash(parsed.data.senhaNova, 10);
-  await db.update(perfis).set({ senhaHash }).where(eq(perfis.id, perfil.id));
+  // trocou a própria senha: deixa de ser provisória
+  await db.update(perfis).set({ senhaHash, senhaProvisoria: false }).where(eq(perfis.id, perfil.id));
   res.json({ ok: true });
 });

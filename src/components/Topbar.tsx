@@ -18,6 +18,7 @@ export function Topbar() {
   const marcarTodasNotifsLidas = useAppStore(s => s.marcarTodasNotifsLidas);
   const menuOpen = useAppStore(s => s.menuOpen);
   const toggleMenu = useAppStore(s => s.toggleMenu);
+  const setMeuPerfilAberto = useAppStore(s => s.setMeuPerfilAberto);
   const setMobileNav = useAppStore(s => s.setMobileNav);
   const logout = useAppStore(s => s.logout);
   const allLeads = useAppStore(s => s.leads);
@@ -128,7 +129,8 @@ export function Topbar() {
         </button>
         {menuOpen && (
           <div className="topbar-dropdown" style={{ position: 'absolute', right: 0, top: 46, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, minWidth: 184, padding: 6, boxShadow: '0 12px 28px rgba(8,17,31,.12)', animation: 'fadeUp .14s ease' }}>
-            <button onClick={() => { toggleMenu(); nav('/configuracoes'); }} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13.5 }}>Ajustes</button>
+            <button onClick={() => { toggleMenu(); setMeuPerfilAberto(true); }} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13.5 }}>Meu perfil e senha</button>
+            {isManager && <button onClick={() => { toggleMenu(); nav('/configuracoes'); }} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13.5 }}>Ajustes</button>}
             <button onClick={() => { toggleMenu(); nav('/manual'); }} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13.5 }}>Manual</button>
             <div style={{ height: 1, background: 'var(--line)', margin: '5px 0' }} />
             <button onClick={() => { toggleMenu(); logout(); nav('/login'); }} style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 13.5, color: 'var(--terra)' }}>Sair</button>

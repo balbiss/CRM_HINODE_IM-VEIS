@@ -368,3 +368,15 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
 - Motivo: WEBJS abre um Chromium por número (~700 MB) e não cabe a equipe toda na VPS; a 2026.10.1 trouxe correções
   de @lid no GOWS (o bug "no LID found" de setembro). EM TESTE: conectar um número de teste, mandar/receber texto,
   áudio e foto. Se falhar, voltar as 3 variáveis do backend pro waha-oka.
+
+## 2026-11-02 — Senhas e avatar no Kanban
+
+- **Redefinir senha** (Equipe, dono/gerente; gerente só de corretor; ninguém a própria): `POST /api/perfis/:id/redefinir-senha`
+  com `{senha?}` — sem senha gera uma fácil de ditar (`hin` + 5, sem 0/O/1/l). Janela mostra a senha uma vez + "Copiar
+  mensagem pronta pro WhatsApp".
+- **Senha provisória** (`perfis.senha_provisoria`, migração 0052): marcada ao redefinir e ao convidar membro (123456).
+  Login e `/me` devolvem `senhaProvisoria`; o front abre "Crie sua senha" obrigatório (não fecha, só "Sair").
+  `PATCH /api/auth/senha` limpa a marca e recusa senha nova igual à atual.
+- **Meu perfil** (`components/MeuPerfil.tsx`): qualquer papel troca a própria senha clicando no nome (barra lateral) ou
+  em "Meu perfil e senha" no menu do topo. "Ajustes" some do menu do topo pra corretor (já era só gestão).
+- Kanban usa o mesmo avatar por origem do card (`ChatAvatar` com `canal`); `LeadAvatar` removido.

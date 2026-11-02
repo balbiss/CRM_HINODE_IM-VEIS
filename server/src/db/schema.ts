@@ -149,6 +149,9 @@ export const perfis = pgTable('perfis', {
   okaId: uuid('oka_id'),
   avatarUrl: text('avatar_url'),
   emAlmoco: boolean('em_almoco').notNull().default(false),
+  // Senha dada por outra pessoa (dono/gerente redefiniu ou membro novo com a padrão): no próximo
+  // acesso a pessoa é obrigada a criar a dela. Trocar a senha limpa.
+  senhaProvisoria: boolean('senha_provisoria').notNull().default(false),
   // Hora em que ficou online na roleta pela última vez ("check-in" da tela Roleta, igual à v1).
   checkinEm: timestamp('checkin_em', { withTimezone: true }),
   // Dono ligou o corretor FORA do expediente: vale até o fim desse dia — o desligamento automático

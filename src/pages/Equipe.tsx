@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { LayoutGrid, List as ListIcon } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, KeyRound, Copy, Check } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 import { useAppStore, roleLabel, type AuthUser } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { ini } from '../lib/format';
@@ -20,6 +21,8 @@ export default function Equipe() {
   const [view, setView] = useState<ViewMode>('cards');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<RemotePerfil | null>(null);
+  const [senhaPara, setSenhaPara] = useState<RemotePerfil | null>(null);
+  const meId = useAppStore(s => s.me?.id);
 
   if (!isManager) return <Navigate to="/denied" replace />;
 
@@ -91,6 +94,7 @@ export default function Equipe() {
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button onClick={() => setEditing(p)} style={{ flex: 1, minWidth: 88, padding: 8, border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Editar</button>
                     <button onClick={() => blockMember(p.id)} style={{ flex: 1, minWidth: 120, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>{p.bloqueado ? 'Desbloquear' : 'Bloquear Acesso (Férias)'}</button>
+                    {p.id !== meId && <button onClick={() => setSenhaPara(p)} style={{ flex: 1, minWidth: 130, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><KeyRound size={13} /> Redefinir senha</button>}
                     {isDono && (
                       <>
                         <button onClick={() => revokeMember(p.nome)} style={{ flex: 1, minWidth: 150, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, color: 'var(--muted)' }}>Remover Acesso (Seguro)</button>
@@ -131,6 +135,7 @@ export default function Equipe() {
                     <>
                       <button onClick={() => setEditing(p)} style={{ padding: '6px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'none', fontSize: 11.5, fontWeight: 600 }}>Editar</button>
                       <button onClick={() => blockMember(p.id)} style={{ padding: '6px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'none', fontSize: 11.5, fontWeight: 600 }}>{p.bloqueado ? 'Desbloquear' : 'Bloquear'}</button>
+                      {p.id !== meId && <button onClick={() => setSenhaPara(p)} title="Redefinir senha" style={{ padding: '6px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'none', fontSize: 11.5, fontWeight: 600 }}>Senha</button>}
                       {isDono && <button onClick={() => removeMember(p.id, p.nome)} style={{ padding: '6px 9px', border: '1px solid #A3341F', borderRadius: 6, background: 'none', fontSize: 11.5, fontWeight: 600, color: '#A3341F' }}>Excluir</button>}
                     </>
                   ) : <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Só o Dono altera</span>}
@@ -143,6 +148,7 @@ export default function Equipe() {
 
       {inviteOpen && <InviteModal isDono={isDono} onClose={() => setInviteOpen(false)} onSubmit={createMember} />}
       {editing && <EditModal perfil={editing} onClose={() => setEditing(null)} onSubmit={updateMember} />}
+      {senhaPara && <RedefinirSenhaModal perfil={senhaPara} onClose={() => setSenhaPara(null)} />}
     </div>
   );
 }
@@ -250,3 +256,78 @@ function EditModal({ perfil, onClose, onSubmit }: {
 
 const fieldLabel: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px' };
 const fieldInput: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5, marginBottom: 16, boxSizing: 'border-box' };
+
+/** Dono/gerente redefine a senha: gera uma automática ou digita a que quiser. A pessoa é obrigada
+ *  a criar a dela no próximo acesso. Mostra a senha uma vez, com mensagem pronta pro WhatsApp. */
+function RedefinirSenhaModal({ perfil, onClose }: { perfil: RemotePerfil; onClose: () => void }) {
+  const token = useAppStore(s => s.token);
+  const [modo, setModo] = useState<'gerar' | 'digitar'>('gerar');
+  const [senha, setSenha] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [pronta, setPronta] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState<'senha' | 'msg' | null>(null);
+  const primeiro = perfil.nome.split(' ')[0];
+
+  const confirmar = async () => {
+    setErro('');
+    if (modo === 'digitar' && senha.trim().length < 6) { setErro('A senha precisa ter pelo menos 6 caracteres'); return; }
+    setSalvando(true);
+    try {
+      const r = await apiFetch<{ senhaTemporaria: string }>('/api/perfis/' + perfil.id + '/redefinir-senha', token, {
+        method: 'POST', body: JSON.stringify(modo === 'digitar' ? { senha: senha.trim() } : {}),
+      });
+      setPronta(r.senhaTemporaria);
+    } catch (e) { setErro((e as Error).message || 'Não foi possível redefinir a senha'); }
+    finally { setSalvando(false); }
+  };
+  const mensagem = pronta
+    ? `Olá, ${primeiro}! Sua senha do CRM Hinode foi redefinida.\n\nAcesse: ${location.origin}\nE-mail: ${perfil.email}\nSenha: ${pronta}\n\nNo primeiro acesso, o sistema vai pedir pra você criar uma senha nova.`
+    : '';
+  const copiar = async (o: 'senha' | 'msg') => {
+    try { await navigator.clipboard.writeText(o === 'senha' ? (pronta ?? '') : mensagem); setCopiado(o); setTimeout(() => setCopiado(null), 1800); } catch { /* navegador sem permissão de copiar */ }
+  };
+  const opcao = (v: 'gerar' | 'digitar', titulo: string, desc: string) => (
+    <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '11px 12px', border: '1px solid ' + (modo === v ? 'var(--terra)' : 'var(--line)'), background: modo === v ? 'var(--terraSoft)' : 'var(--bg)', borderRadius: 10, cursor: 'pointer', marginBottom: 8 }}>
+      <input type="radio" checked={modo === v} onChange={() => setModo(v)} style={{ accentColor: 'var(--terra)', marginTop: 2 }} />
+      <span><b style={{ display: 'block', fontSize: 13.5 }}>{titulo}</b><span style={{ fontSize: 12, color: 'var(--muted)' }}>{desc}</span></span>
+    </label>
+  );
+
+  return (
+    <div onClick={onClose} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
+      <div onClick={e => e.stopPropagation()} className="modal-card" role="dialog" aria-label="Redefinir senha" style={{ width: '100%', maxWidth: 430, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 24, animation: 'fadeUp .14s ease' }}>
+        <h3 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 22, margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}><KeyRound size={18} color="var(--terra)" /> Redefinir senha</h3>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 16px' }}>{perfil.nome} · {perfil.email}</p>
+        {!pronta ? (
+          <>
+            {opcao('gerar', 'Gerar uma senha automática', 'O CRM cria uma senha fácil de ditar.')}
+            {opcao('digitar', 'Eu escolho a senha', 'Você digita a senha provisória.')}
+            {modo === 'digitar' && <input autoFocus value={senha} onChange={e => setSenha(e.target.value)} placeholder="Mínimo 6 caracteres" style={{ ...fieldInput, marginTop: 4, marginBottom: 8 }} />}
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 0', lineHeight: 1.5 }}>A senha antiga para de funcionar na hora. No próximo acesso, {primeiro} vai ter que criar uma senha só dele(a).</p>
+            {erro && <p style={{ fontSize: 12.5, color: '#C0392B', margin: '10px 0 0' }}>{erro}</p>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+              <button onClick={onClose} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600 }}>Cancelar</button>
+              <button onClick={confirmar} disabled={salvando} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Redefinindo…' : 'Redefinir senha'}</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 12.5, margin: '0 0 8px', color: 'var(--olive)', fontWeight: 700 }}>Senha redefinida. Passe para {primeiro}:</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', border: '1px dashed var(--terra)', borderRadius: 10, background: 'var(--terraSoft)' }}>
+              <code style={{ flex: 1, fontSize: 20, fontWeight: 800, letterSpacing: '.06em', color: 'var(--ink)' }}>{pronta}</code>
+              <button onClick={() => copiar('senha')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 12, fontWeight: 600 }}>{copiado === 'senha' ? <Check size={13} /> : <Copy size={13} />} {copiado === 'senha' ? 'Copiado' : 'Copiar'}</button>
+            </div>
+            <button onClick={() => copiar('msg')} style={{ width: '100%', marginTop: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 12.5, fontWeight: 600 }}>
+              {copiado === 'msg' ? <Check size={13} /> : <Copy size={13} />} {copiado === 'msg' ? 'Mensagem copiada' : 'Copiar mensagem pronta pro WhatsApp'}
+            </button>
+            <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '10px 0 0', lineHeight: 1.5 }}>Essa senha só aparece agora. Se perder, é só redefinir de novo.</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button onClick={onClose} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Pronto</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

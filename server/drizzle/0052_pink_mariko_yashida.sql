@@ -1,0 +1,1 @@
+ALTER TABLE "perfis" ADD COLUMN "senha_provisoria" boolean DEFAULT false NOT NULL;

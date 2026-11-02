@@ -110,7 +110,7 @@ function mapRemoteMensagem(r: RemoteMensagem): ChatMsg {
   };
 }
 
-export interface AuthUser { id: string; nome: string; email: string; role: 'dono' | 'gerente' | 'corretor'; telefone?: string | null; emPlantao: boolean }
+export interface AuthUser { id: string; nome: string; email: string; role: 'dono' | 'gerente' | 'corretor'; telefone?: string | null; emPlantao: boolean; senhaProvisoria?: boolean }
 
 export const roleLabel: Record<AuthUser['role'], Role> = { dono: 'Dono', gerente: 'Gerente', corretor: 'Corretor' };
 
@@ -148,6 +148,11 @@ interface AppState {
   token: string | null;
   me: AuthUser | null;
   authLoading: boolean;
+  /** "Meu perfil" (dados + alterar senha) aberto — qualquer papel abre clicando no próprio nome. */
+  meuPerfilAberto: boolean;
+  setMeuPerfilAberto: (v: boolean) => void;
+  /** Trocou a senha provisória: libera o uso do CRM. */
+  senhaCriada: () => void;
   authError: string | null;
 
   theme: 'light' | 'dark';
@@ -508,6 +513,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   token: null,
   me: null,
   authLoading: false,
+  meuPerfilAberto: false,
+  setMeuPerfilAberto: v => set({ meuPerfilAberto: v }),
+  senhaCriada: () => set(s => ({ me: s.me ? { ...s.me, senhaProvisoria: false } : s.me })),
   authError: null,
 
   theme: 'light',

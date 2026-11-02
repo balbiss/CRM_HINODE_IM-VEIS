@@ -80,7 +80,7 @@ export function perfisRouter(io: SocketServer) {
 
     const senhaHash = await bcrypt.hash('123456', 10);
     const [inserido] = await db.insert(perfis).values({
-      imobiliariaId, nome: parsed.data.nome, email, senhaHash,
+      imobiliariaId, nome: parsed.data.nome, email, senhaHash, senhaProvisoria: true,
       role: parsed.data.role, telefone: parsed.data.telefone,
     }).returning();
 
@@ -147,11 +147,18 @@ export function perfisRouter(io: SocketServer) {
     const { imobiliariaId, role } = req.auth!;
     const [alvo] = await db.select().from(perfis).where(and(eq(perfis.id, req.params.id), eq(perfis.imobiliariaId, imobiliariaId))).limit(1);
     if (!alvo) return res.status(404).json({ error: 'Perfil não encontrado' });
+    if (alvo.id === req.auth!.sub) return res.status(400).json({ error: 'Pra trocar a sua senha, use "Meu perfil"' });
     if (role === 'gerente' && alvo.role !== 'corretor') return res.status(403).json({ error: 'Gerente só redefine senha de corretores' });
 
-    const senhaTemporaria = 'vi' + Math.random().toString(36).slice(2, 8);
+    // o dono pode digitar a senha nova; sem senha no pedido, gera uma fácil de ditar (sem 0/O/1/l)
+    const parsed = z.object({ senha: z.string().trim().min(6, 'A senha precisa ter pelo menos 6 caracteres').max(60).optional() }).safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || 'Senha inválida' });
+    const letras = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const senhaTemporaria = parsed.data.senha
+      ?? 'hin' + Array.from(crypto.getRandomValues(new Uint8Array(5)), b => letras[b % letras.length]).join('');
     const senhaHash = await bcrypt.hash(senhaTemporaria, 10);
-    await db.update(perfis).set({ senhaHash }).where(eq(perfis.id, alvo.id));
+    // provisória: no próximo acesso a pessoa cria a dela
+    await db.update(perfis).set({ senhaHash, senhaProvisoria: true }).where(eq(perfis.id, alvo.id));
     res.json({ ok: true, senhaTemporaria });
   });
 

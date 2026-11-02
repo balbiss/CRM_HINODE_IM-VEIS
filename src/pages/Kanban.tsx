@@ -7,7 +7,7 @@ import { useRoleInfo } from '../lib/selectors';
 import { canalPill } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
-import { LeadAvatar } from '../components/LeadAvatar';
+import { ChatAvatar } from '../components/ChatAvatar';
 import { foraDoKanban, perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { Flame, Snowflake, Sun } from 'lucide-react';
 
@@ -251,10 +251,10 @@ export default function Kanban() {
             <span style={{ width: 110 }}>Entrou em</span>
             <span style={{ width: 90 }}>Tempo</span>
           </div>
-          {leads.slice(0, visivelLista).map((l, i) => (
+          {leads.slice(0, visivelLista).map(l => (
             <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
               <button onClick={() => openLead(l.id)} style={{ flex: 1.6, minWidth: 0, display: 'flex', gap: 11, alignItems: 'center', background: 'none', border: 'none', textAlign: 'left', padding: 0 }}>
-                <LeadAvatar foto={l.foto} seedIndex={i} size={32} />
+                <ChatAvatar nome={l.nome} foto={l.foto} canal={l.canal} size={32} />
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
                   <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.imovel}</span>
@@ -361,7 +361,7 @@ export default function Kanban() {
                     )}
                   </div>
                   <div className="kb-col-body" style={{ display: 'flex', flexDirection: 'column', gap: 9, minHeight: 60, maxHeight: 'calc(100vh - 265px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
-                    {colLeads.map((l, i) => (
+                    {colLeads.map(l => (
                       <div
                         key={l.id}
                         draggable
@@ -372,7 +372,7 @@ export default function Kanban() {
                         style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: 11, cursor: 'grab' }}
                       >
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                          <LeadAvatar foto={l.foto} seedIndex={i} size={34} />
+                          <ChatAvatar nome={l.nome} foto={l.foto} canal={l.canal} size={34} />
                           <span style={{ flex: 1, minWidth: 0 }}>
                             {l.temperatura && (
                               <span style={{ float: 'right', marginLeft: 4 }} title={'Temperatura: ' + l.temperatura}>

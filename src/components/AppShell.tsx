@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { MobileNav } from './MobileNav';
 import { LeadModal } from './LeadModal';
+import { MeuPerfil } from './MeuPerfil';
 import { ModaisRegrasOka } from './ModaisRegrasOka';
 import { AlertaCreditoModal } from './AlertaCreditoModal';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -71,6 +72,7 @@ export function AppShell() {
 
       <MobileNav />
       <LeadModal />
+      <MeuPerfil />
       <ModaisRegrasOka />
       <AlertaCreditoModal />
       <ConfirmDialog />

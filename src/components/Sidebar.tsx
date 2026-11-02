@@ -15,6 +15,7 @@ export function Sidebar() {
   const toggleMeuPlantao = useAppStore(s => s.toggleMeuPlantao);
   const toast = useAppStore(s => s.toast);
   const logout = useAppStore(s => s.logout);
+  const setMeuPerfilAberto = useAppStore(s => s.setMeuPerfilAberto);
   const { isManager, role, meNome } = useRoleInfo();
   const unread = useUnreadTotal();
   const rebatidas = useRebatidasTotal();
@@ -106,13 +107,18 @@ export function Sidebar() {
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: open ? 'flex-start' : 'center' }}>
+          <button onClick={() => setMeuPerfilAberto(true)} title="Meu perfil e senha"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, flex: open ? 1 : 'none', minWidth: 0, border: 'none', background: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'inherit', font: 'inherit' }}>
           <span style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--terraSoft)', color: 'var(--terra)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700, flex: 'none' }}>{ini(meNome)}</span>
           {open && (
-            <>
               <span style={{ minWidth: 0, flex: 1 }}>
                 <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.95)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meNome}</span>
-                <span style={{ display: 'block', fontSize: 9, color: 'var(--sideMuted)', textTransform: 'uppercase', fontWeight: 600 }}>{role}</span>
+                <span style={{ display: 'block', fontSize: 9, color: 'var(--sideMuted)', textTransform: 'uppercase', fontWeight: 600 }}>{role} · meu perfil</span>
               </span>
+          )}
+          </button>
+          {open && (
+            <>
               <button
                 onClick={() => { logout(); toast('Até logo!'); nav('/login'); }}
                 title="Sair"
