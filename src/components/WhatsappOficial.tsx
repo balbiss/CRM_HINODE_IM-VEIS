@@ -79,7 +79,7 @@ async function cadastroIncorporado(cfg: ConfigOficial): Promise<{ code: string; 
 }
 
 /** Botão que conecta a oficial — num número existente (sessaoId) ou num novo. */
-export function BotaoConectarOficial({ sessaoId, rotuloBotao, estilo }: { sessaoId?: string; rotuloBotao: string; estilo?: React.CSSProperties }) {
+export function BotaoConectarOficial({ sessaoId, rotuloBotao, estilo, classe }: { sessaoId?: string; rotuloBotao: React.ReactNode; estilo?: React.CSSProperties; classe?: string }) {
   const cfg = useConfigOficial();
   const token = useAppStore(s => s.token);
   const toast = useAppStore(s => s.toast);
@@ -97,7 +97,8 @@ export function BotaoConectarOficial({ sessaoId, rotuloBotao, estilo }: { sessao
       toast((e as Error).message || 'Não deu pra conectar a API oficial');
     } finally { setOcupado(false); }
   };
-  return <button onClick={conectar} disabled={ocupado} style={{ ...(estilo || btn), opacity: ocupado ? 0.6 : 1 }}>{ocupado ? 'Conectando…' : rotuloBotao}</button>;
+  // rótulo de texto vira "Conectando…"; rótulo rico (logo + texto) fica e só esmaece
+  return <button onClick={conectar} disabled={ocupado} className={classe} style={{ ...(estilo || btn), opacity: ocupado ? 0.6 : 1 }}>{ocupado && typeof rotuloBotao === 'string' ? 'Conectando…' : rotuloBotao}</button>;
 }
 
 /** Linha "API oficial" embaixo de cada número central. */

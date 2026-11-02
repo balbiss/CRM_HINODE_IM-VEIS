@@ -339,7 +339,26 @@ const botao: React.CSSProperties = { padding: '9px 14px', border: '1px solid var
 const pre: React.CSSProperties = { background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: 12, fontSize: 12, lineHeight: 1.55, overflowX: 'auto', margin: '0 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
 
 const linhaNumero: React.CSSProperties = { border: '1px solid var(--line)', borderRadius: 10, background: 'var(--card)', padding: 14 };
-const botaoNovoNumero: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '12px 14px', borderRadius: 10, background: 'none', textAlign: 'left', border: '1px dashed var(--line)', color: 'var(--muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const botaoConectar: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '14px 16px', borderRadius: 12, background: 'var(--card)', textAlign: 'left', border: '1px solid var(--line)', color: 'var(--ink)', cursor: 'pointer', font: 'inherit', boxShadow: '0 1px 2px rgba(0,0,0,.04)' };
+
+/** Miolo dos botões "Conectar número": logo do WhatsApp num círculo verde + título + canal + explicação. */
+function ConteudoConectar({ titulo, canal, desc, oficial }: { titulo: string; canal: string; desc: string; oficial?: boolean }) {
+  return (
+    <>
+      <span style={{ width: 42, height: 42, borderRadius: '50%', background: '#25D366', display: 'grid', placeItems: 'center', flex: 'none', boxShadow: '0 2px 6px rgba(37,211,102,.35)' }}>
+        <IconeWhatsapp size={22} color="#fff" />
+      </span>
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+          {canal}{oficial && <span style={{ fontSize: 9, color: '#128C7E', background: 'rgba(37,211,102,.14)', padding: '2px 6px', borderRadius: 20, letterSpacing: '.06em' }}>Meta</span>}
+        </span>
+        <span style={{ display: 'block', fontSize: 14, fontWeight: 700, marginTop: 2 }}>+ {titulo}</span>
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{desc}</span>
+      </span>
+    </>
+  );
+}
+
 const btn: React.CSSProperties = { padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 12.5, fontWeight: 600 };
 const dtStyle: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)', alignSelf: 'start', paddingTop: 1 };
 
@@ -711,11 +730,13 @@ function ConexaoWhatsapp({ modo }: { modo: ModoWhatsapp }) {
                 <OficialDoNumero s={s} />
                 </div>
               ))}
-              <button onClick={() => abrirConexao('central', undefined, 'Novo número')} style={botaoNovoNumero}>
-                + Conectar {centrais.length ? 'outro número' : 'um número'} pelo WhatsApp não oficial
-              </button>
-              <BotaoConectarOficial rotuloBotao={'+ Conectar ' + (centrais.length ? 'outro número' : 'um número') + ' pela API oficial do WhatsApp'}
-                estilo={botaoNovoNumero} />
+              <div className="botoes-conectar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 10, marginTop: centrais.length ? 4 : 0 }}>
+                <button onClick={() => abrirConexao('central', undefined, 'Novo número')} className="botao-conectar" style={botaoConectar}>
+                  <ConteudoConectar titulo={'Conectar ' + (centrais.length ? 'outro número' : 'um número')} canal="WhatsApp não oficial" desc="Lendo o QR code no celular" />
+                </button>
+                <BotaoConectarOficial estilo={botaoConectar} classe="botao-conectar"
+                  rotuloBotao={<ConteudoConectar titulo={'Conectar ' + (centrais.length ? 'outro número' : 'um número')} canal="API oficial do WhatsApp" desc="Pela conta da Meta (Facebook)" oficial />} />
+              </div>
             </>
           : (corretores.length === 0
               ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Nenhum corretor cadastrado ainda.</p>

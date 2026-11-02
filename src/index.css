@@ -210,3 +210,4 @@ a:hover { color: var(--ink); }
 }
 .rel-funil:hover { border-color: var(--terra) !important; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
 @media (max-width: 520px) { .entraram-corretor { display: none; } }
+.botao-conectar:hover:not(:disabled) { border-color: #25D366 !important; box-shadow: 0 4px 14px rgba(37,211,102,.16) !important; }
