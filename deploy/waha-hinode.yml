@@ -1,0 +1,66 @@
+# Stack Swarm do WAHA dedicado do CRM HINODE (v2) -- criado 2026-11-02.
+#
+# SEPARADO do waha-oka (stack 34, que atende o CRM OKA/v1): cada CRM no seu WhatsApp,
+# um não derruba o outro. Mesma rede overlay `inoovaweb` -- o backend da v2
+# (crm-hinode_hinode_backend) fala com ele por http://waha-hinode_waha:3000.
+# Sem domínio público por enquanto (QR e mídia passam pelo backend do CRM).
+#
+# Engine: GOWS (Go/whatsmeow, sem navegador) -- bem mais leve que o WEBJS
+# (~100-200 MB por número contra ~700 MB), cabe a equipe toda na VPS de 8 GB.
+# 2026.10.1 trouxe várias correções de @lid no GOWS; em teste antes da virada.
+# Se falhar: voltar WAHA_URL/WAHA_API_KEY do backend da v2 pro waha-oka.
+
+version: "3.7"
+
+services:
+  waha:
+    image: devlikeapro/waha:latest-2026.10.1
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - WAHA_DASHBOARD_ENABLED=True
+      - WAHA_DASHBOARD_USERNAME=admin
+      - WAHA_DASHBOARD_PASSWORD=${WAHA_DASHBOARD_PASSWORD}
+      - WHATSAPP_SWAGGER_ENABLED=True
+      - WHATSAPP_SWAGGER_USERNAME=admin
+      - WHATSAPP_SWAGGER_PASSWORD=${WHATSAPP_SWAGGER_PASSWORD}
+      - WHATSAPP_DEFAULT_ENGINE=GOWS
+      - WAHA_BASE_URL=http://waha-hinode_waha:3000
+      - WAHA_PRINT_QR=False
+      - WAHA_LOG_FORMAT=JSON
+      - WAHA_LOG_LEVEL=info
+      - TZ=America/Sao_Paulo
+      - WAHA_MEDIA_STORAGE=LOCAL
+      - WHATSAPP_FILES_LIFETIME=0
+      - WHATSAPP_FILES_FOLDER=/app/.media
+    volumes:
+      - waha_hinode_sessions:/app/.sessions
+      - waha_hinode_media:/app/.media
+    networks:
+      - inoovaweb
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  inoovaweb:
+    external: true
+    name: inoovaweb
+
+volumes:
+  waha_hinode_sessions:
+  waha_hinode_media:

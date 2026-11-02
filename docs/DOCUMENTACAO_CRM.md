@@ -357,3 +357,14 @@ Kanban · financeiro · transferir/venda/devolver · documentos e perfil do inte
 Devolvidos; "Sem corretor" filtra a lista e "Distribuir agora" leva ao Bolsão (aba Leads Novos). Substitui com mais
 detalhe o cartão "Leads Novos (Hoje + Ontem)" da v1. Usa os leads já carregados no navegador.
 Também: funil completo dos Relatórios redesenhado (só etapas com lead em linhas, zeradas em etiquetas, venda separada).
+
+## 2026-11-02 — WAHA próprio da v2 (GOWS)
+
+- Stack Portainer `waha-hinode` (Id 36, .cloud), arquivo em `deploy/waha-hinode.yml` (senhas via variáveis da stack,
+  não ficam no repo). Imagem `devlikeapro/waha:latest-2026.10.1`, motor **GOWS** (sem navegador, ~100–200 MB por número),
+  limite 1 GB, rede `inoovaweb`, sem domínio público.
+- Backend da v2: `WAHA_URL=http://waha-hinode_waha:3000`, `WAHA_API_KEY` própria, `WAHA_ENGINE=GOWS`.
+- Separado do `waha-oka` (stack 34, WEBJS), que continua atendendo o CRM OKA (v1) — um não derruba mais o outro.
+- Motivo: WEBJS abre um Chromium por número (~700 MB) e não cabe a equipe toda na VPS; a 2026.10.1 trouxe correções
+  de @lid no GOWS (o bug "no LID found" de setembro). EM TESTE: conectar um número de teste, mandar/receber texto,
+  áudio e foto. Se falhar, voltar as 3 variáveis do backend pro waha-oka.
