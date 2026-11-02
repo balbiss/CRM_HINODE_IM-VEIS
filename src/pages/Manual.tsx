@@ -2,11 +2,11 @@ import { useAppStore } from '../store/appStore';
 
 const FAQ = [
   { id: 'kanban', q: 'Kanban de Leads', a: 'Cada coluna é uma etapa real do seu processo comercial. Arraste o card para mover o lead — o tempo na coluna reinicia e o histórico registra a mudança. Colunas podem ser criadas, renomeadas e reordenadas pelo Dono.' },
-  { id: 'roleta', q: 'Roleta de Atendimento', a: 'A roleta distribui leads novos na ordem da fila, pulando quem estiver indisponível. Embaralhar reordena a fila mantendo apenas os corretores ativos.' },
+  { id: 'roleta', q: 'Roleta de Atendimento', a: 'A roleta distribui leads novos na ordem da fila, pulando quem estiver indisponível. Na "Ordem de prioridade" de cada roleta aparece quem está ONLINE ou OFFLINE e a hora do check-in (quando ficou online). Dono e gerente clicam no status pra colocar ou tirar alguém, e arrastam a linha pra mudar a ordem. Fora do expediente só o dono consegue colocar um corretor online: ele recebe leads até a meia-noite e depois sai sozinho. Quando o dono ou o gerente coloca o corretor online, não conta advertência de "depois das 14h".' },
   { id: 'bolsao', q: 'Bolsão e Rebatidas', a: 'Leads sem corretor, descartados ou sem resposta caem no bolsão. Qualquer corretor pode puxar rebatidas dentro do limite definido pelo gerente.' },
   { id: 'followup', q: 'Follow-up Automático', a: 'Sequências de mensagens com atraso configurável e variáveis. Se o lead responde, a sequência pausa automaticamente.' },
   { id: 'credito', q: 'Análise de Crédito', a: 'Pastas enviadas ao banco aparecem com status. Pendências devolvidas geram alerta no topo do módulo e tarefa para o corretor responsável.' },
-  { id: 'relatorios', q: 'Relatórios', a: 'Funil por etapa real do Kanban, ranking configurável e exportação CSV. Filtros de período, corretor e campanha valem para todos os blocos.' },
+  { id: 'relatorios', q: 'Relatórios', a: 'Tudo o que a v1 tinha, organizado em seções: visão geral (leads, SLA, conversão, vendas), funil completo (clique numa barra pra ver os leads e abrir o card), status do funil, leads novos com renda, ranking de consultores, atendimento da roleta, origem e campanhas (com gasto e CAC), follow-up e devoluções. Filtre por mês OU por um intervalo de datas, por cidade, por corretor e por uma ou várias campanhas (com busca e "Marcar todas"). O ranking conta o que cada corretor fez no período, inclusive rebatidas puxadas e etapas em leads antigos. Exportar CSV baixa os números do filtro.' },
 ];
 
 export default function Manual() {

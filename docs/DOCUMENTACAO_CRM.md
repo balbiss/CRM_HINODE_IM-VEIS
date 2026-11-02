@@ -325,3 +325,29 @@ O que entrou (detalhe de uso em `docs/MANUAL_FUNCOES.md`; detalhe dos fluxos n8n
 
 Sem as variáveis da última coluna, a função correspondente fica desligada sem quebrar nada
 (ex.: sem `N8N_AGENTE_IA_WEBHOOK_URL` o lead vai direto pra roleta, como antes).
+
+## 2026-11-02 — Relatórios iguais à v1, roleta com check-in e liberação do dono, card em blocos
+
+**Relatórios** (`pages/Relatorios.tsx`, `components/relatorios/ui.tsx`, `routes/relatoriosOka.ts`, `routes/relatorios.ts`, `lib/filtroRelatorio.ts`)
+- Filtros da v1: mês OU intervalo (de/até), cidade (bairro de interesse, sem diferenciar acento), corretor (gestão) e
+  várias campanhas (busca + "Marcar todas"). Valem pra tela toda, menos o Relatório de Campanhas (compara todas) e o
+  Relatório individual (período próprio). "Origem" = campanha do lead ou, sem campanha, o canal.
+- Seções: Visão geral · Funil e etapas (funil completo clicável → `GET /api/relatorios-oka/leads` → abre o card) ·
+  Equipe (ranking, atendimento da roleta, recusas, rebatidas do dia) · Origem e campanhas (volume, temperatura,
+  campanhas com % por etapa, aprovação de crédito, gasto/CAC, por dia, horário, canais) · Pós-atendimento · Individual.
+- **Ranking de consultores conta a atividade do período** (a v1 zerava rebatidas/etapas porque só olhava leads
+  criados no período e a coluna atual). Base: tabela `lead_etapas`, gravada por TRIGGER no banco a cada mudança de
+  coluna/corretor (migração 0050), + eventos da v1 importada + `distribuicao_log` (rebatida puxada).
+  `importar-oka` desliga o trigger durante a carga pra não criar histórico falso.
+
+**Roleta** (`lib/roletaOka.ts`, `routes/filas.ts`, `routes/roletas.ts`, `pages/Roleta.tsx`) — migração 0051
+- `perfis.checkin_em`: hora em que ficou online (mostrado como "Check-in" na Ordem de prioridade).
+- `perfis.plantao_liberado_ate`: fora do expediente SÓ o dono coloca alguém online; vale até 00:00. Enquanto vale,
+  o desligamento automático não derruba e a roleta entrega lead só pra quem foi liberado; à meia-noite sai sozinho.
+- Dono/gerente ligando OUTRO corretor não gera advertência de "depois das 14h".
+- Tela: Ordem de prioridade igual à v1 (posição, check-in, STATUS ONLINE/OFFLINE clicável, arrastar pra reordenar).
+- Teste com relógio controlado: `server/src/db/teste-liberacao-dono.ts` (só roda em banco local).
+
+**Card do lead** (`components/LeadDetalhesOka.tsx`): aba Detalhes em blocos sem título, azul claro / branco
+alternados (cores `--blocoAzul`/`--blocoAzulBorda`): contato · próximo contato e compromisso · cadência e status do
+Kanban · financeiro · transferir/venda/devolver · documentos e perfil do interesse.

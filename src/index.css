@@ -5,7 +5,7 @@
   --bg: #F7F4EF; --card: #FFFDFA; --card-2: #EFE7DA; --ink: #1C1B1A; --muted: #6F6862; --line: #E4DDD2;
   --terra: #B5652F; --terraSoft: #F1E3D7;
   /* "sucesso / concluído / positivo" — oliva, reservado pra badges de status (Ativo/Fidelizado). */
-  --olive: #5E6B3F; --oliveSoft: #E6E9DC;
+  --olive: #5E6B3F; --oliveSoft: #E6E9DC; --blocoAzul: #EDF4FC; --blocoAzulBorda: #CFE0F4;
   /* verde reservado SÓ pro interruptor de "No Plantão" (convenção ligado/desligado). */
   --plantao: #5E6B3F; --plantaoSoft: #E6E9DC;
   --side: #201F1D; --sideInk: #EFE9E0; --sideMuted: #918A81; --skel: #EAE4DA;
@@ -26,7 +26,7 @@
 [data-theme='dark'] {
   --bg: #161513; --card: #1F1E1B; --card-2: #262320; --ink: #F2EEE7; --muted: #A39B91; --line: #332F2A;
   --terra: #C97C46; --terraSoft: #33251C;
-  --olive: #8A9A62; --oliveSoft: #242A1C;
+  --olive: #8A9A62; --oliveSoft: #242A1C; --blocoAzul: #17212C; --blocoAzulBorda: #24364A;
   --plantao: #8A9A62; --plantaoSoft: #242A1C;
   --side: #111110; --sideInk: #EFE9E0; --sideMuted: #8B847B; --skel: #272521;
   --side-accent: #C97C46;
