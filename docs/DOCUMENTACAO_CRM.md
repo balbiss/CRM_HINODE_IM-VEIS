@@ -351,3 +351,9 @@ Sem as variáveis da última coluna, a função correspondente fica desligada se
 **Card do lead** (`components/LeadDetalhesOka.tsx`): aba Detalhes em blocos sem título, azul claro / branco
 alternados (cores `--blocoAzul`/`--blocoAzulBorda`): contato · próximo contato e compromisso · cadência e status do
 Kanban · financeiro · transferir/venda/devolver · documentos e perfil do interesse.
+
+**Dashboard — "Leads que entraram"** (`components/LeadsEntraram.tsx`, só dono/gerente): quem chegou hoje e ontem
+(fuso de Brasília) com hora, campanha/canal, cidade, etapa e corretor; resumo Entraram / Com corretor / Sem corretor /
+Devolvidos; "Sem corretor" filtra a lista e "Distribuir agora" leva ao Bolsão (aba Leads Novos). Substitui com mais
+detalhe o cartão "Leads Novos (Hoje + Ontem)" da v1. Usa os leads já carregados no navegador.
+Também: funil completo dos Relatórios redesenhado (só etapas com lead em linhas, zeradas em etiquetas, venda separada).

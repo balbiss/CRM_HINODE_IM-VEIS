@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore';
 import { useRoleInfo, scopeLeads } from '../lib/selectors';
 import { CANAIS } from '../lib/data';
 import { BRL, ini } from '../lib/format';
+import { LeadsEntraram } from '../components/LeadsEntraram';
 
 const CARGO: Record<string, string> = { dono: 'Dono', gerente: 'Gerente', corretor: 'Corretor' };
 
@@ -91,6 +92,8 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {isManager && <LeadsEntraram />}
 
       <div className="grid2" style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 14, marginBottom: 14 }}>
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', padding: 22 }}>
