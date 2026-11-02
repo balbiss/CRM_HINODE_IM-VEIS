@@ -10,6 +10,55 @@ export const th: React.CSSProperties = { textAlign: 'right', fontSize: 10.5, let
 export const td: React.CSSProperties = { padding: '10px', fontSize: 13, borderBottom: '1px solid var(--line)', whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 export const vazioTxt: React.CSSProperties = { fontSize: 13, color: 'var(--muted)', margin: 0, padding: '6px 0' };
 
+/** Nome de coluna padronizado: "ANÁLISE DE CRÉDITO" → "Análise de Crédito"; siglas curtas (FID) ficam. */
+export function nomeEtapa(t: string) {
+  const minusculas = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o']);
+  return t.trim().split(/\s+/).map((p, i) => {
+    if (p.length <= 3 && p === p.toUpperCase() && /[A-Z]/.test(p) && !minusculas.has(p.toLowerCase())) return p;
+    const l = p.toLocaleLowerCase('pt-BR');
+    if (i > 0 && minusculas.has(l)) return l;
+    return l.replace(/(^|-)(\p{L})/gu, (_m, sep, c) => sep + c.toLocaleUpperCase('pt-BR'));
+  }).join(' ');
+}
+
+/** Funil completo: etapas com lead em linhas grandes (barra no fundo, número em destaque, clicáveis),
+ *  etapas zeradas numa fileira compacta e a venda separada no fim. */
+export function Funil({ etapas, venda, total, onClick }: {
+  etapas: { chave: string; nome: string; n: number }[];
+  venda: number; total: number; onClick: (chave: string, nome: string) => void;
+}) {
+  const comLead = etapas.filter(e => e.n > 0);
+  const zeradas = etapas.filter(e => e.n === 0);
+  const max = Math.max(1, ...comLead.map(e => e.n), venda);
+  const Linha = ({ chave, nome, n, final }: { chave: string; nome: string; n: number; final?: boolean }) => (
+    <button onClick={() => onClick(chave, nome)} className="rel-funil" title={`${nome}: ${n} lead${n === 1 ? '' : 's'} — clique para ver`}
+      style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, width: '100%', padding: '10px 14px', border: '1px solid ' + (final ? 'color-mix(in srgb, var(--olive) 35%, var(--line))' : 'var(--line)'), borderRadius: 10, background: 'var(--card)', overflow: 'hidden', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+      <span aria-hidden style={{ position: 'absolute', inset: 0, width: Math.max(1.5, (n / max) * 100) + '%', background: final ? 'var(--oliveSoft)' : 'var(--terraSoft)', borderRight: n ? '2px solid ' + (final ? 'var(--olive)' : 'var(--terra)') : 'none', transition: 'width .3s' }} />
+      <span style={{ position: 'relative', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</span>
+      <span style={{ position: 'relative', display: 'flex', alignItems: 'baseline', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
+        <b style={{ fontSize: 17, fontFamily: 'Newsreader,serif', fontWeight: 500, color: final ? 'var(--olive)' : 'var(--ink)' }}>{n}</b>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)', minWidth: 38, textAlign: 'right' }}>{total ? Math.round((n / total) * 100) + '%' : '—'}</span>
+      </span>
+    </button>
+  );
+  if (!total && !venda) return <p style={vazioTxt}>Nenhum lead no período.</p>;
+  return (
+    <div style={{ display: 'grid', gap: 7, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      {comLead.map(e => <Linha key={e.chave} chave={e.chave} nome={e.nome} n={e.n} />)}
+      <div style={{ borderTop: '1px dashed var(--line)', margin: '5px 0 3px' }} />
+      <Linha chave="venda" nome="Venda fechada no período" n={venda} final />
+      {zeradas.length > 0 && (
+        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)', marginRight: 2 }}>Sem leads no período</span>
+          {zeradas.map(e => (
+            <span key={e.chave} style={{ fontSize: 11.5, color: 'var(--muted)', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 20, padding: '3px 9px', whiteSpace: 'nowrap' }}>{e.nome}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Cabeçalho de seção: rótulo pequeno + título. */
 export function Secao({ rotulo, titulo, desc, children }: { rotulo: string; titulo: string; desc?: string; children: React.ReactNode }) {
   return (

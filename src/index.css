@@ -208,3 +208,4 @@ a:hover { color: var(--ink); }
   .rel-filtros label, .rel-filtros label > select, .rel-filtros label > input, .rel-filtros label > div, .rel-filtros label > div > button { width: 100%; max-width: none !important; }
   .rel-filtros .rel-mes { grid-column: 1 / -1; }
 }
+.rel-funil:hover { border-color: var(--terra) !important; box-shadow: 0 2px 10px rgba(0,0,0,.06); }

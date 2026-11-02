@@ -4,7 +4,7 @@ import { useRoleInfo } from '../lib/selectors';
 import { BRL } from '../lib/format';
 import { apiFetch } from '../lib/api';
 import { RelatorioCorretor } from '../components/RelatorioCorretor';
-import { Secao, Painel, Kpi, BarrasH, Barras, Rosca, FiltroCampanhas, ModalLeads, campoFiltro, card, th, td, vazioTxt } from '../components/relatorios/ui';
+import { Secao, Painel, Kpi, BarrasH, Barras, Rosca, Funil, nomeEtapa, FiltroCampanhas, ModalLeads, campoFiltro, card, th, td, vazioTxt } from '../components/relatorios/ui';
 
 /** Relatórios — todas as funções da v1 (CRM OKA) + os números próprios da v2, com os filtros da v1:
  *  mês OU intervalo de datas, cidade, corretor e várias campanhas. Os filtros valem para a tela toda,
@@ -253,20 +253,16 @@ export default function Relatorios() {
 
           {/* 2. FUNIL */}
           <Secao rotulo="02" titulo="Funil e etapas" desc="Clique numa barra ou fatia para ver os leads e abrir o card.">
-            <Painel titulo="Funil completo" desc="Quantos leads do período estão ou já passaram por cada coluna do Kanban. Venda = fechadas no período.">
-              <BarrasH larguraRotulo={170} vazio="Sem leads no período."
-                dados={[...v1.funil.map(f => ({ chave: f.colunaId, nome: f.titulo, valor: f.n, extra: pct(f.n, r.leads) + '%' })),
-                  { chave: 'venda', nome: 'Venda', valor: r.vendas, cor: 'var(--olive)', extra: pct(r.vendas, r.leads) + '%' }]}
-                onClick={chave => {
-                  if (chave === 'venda') abrirLista('Vendas do período', 'venda', 'passou');
-                  else abrirLista(v1.funil.find(f => f.colunaId === chave)?.titulo ?? 'Etapa', chave, 'passou');
-                }} />
+            <Painel titulo="Funil completo" desc={`Dos ${r.leads} lead${r.leads === 1 ? '' : 's'} do período, quantos estão ou já passaram por cada etapa do Kanban. Clique numa etapa para ver os leads.`}>
+              <Funil total={r.leads} venda={r.vendas}
+                etapas={v1.funil.filter(f => f.slug !== 'venda').map(f => ({ chave: f.colunaId, nome: nomeEtapa(f.titulo), n: f.n }))}
+                onClick={(chave, nome) => abrirLista(chave === 'venda' ? 'Vendas do período' : nome, chave, 'passou')} />
             </Painel>
             <div style={grid2}>
               <Painel titulo="Status do funil" desc="Em que coluna os leads do período estão agora.">
                 <Rosca centro={String(v1.novos.total)} rotuloCentro="leads"
-                  dados={v1.novos.porEtapa.map(e => ({ chave: e.coluna_id ?? 'sem', nome: e.titulo, valor: e.total }))}
-                  onClick={chave => abrirLista((v1.novos.porEtapa.find(e => (e.coluna_id ?? 'sem') === chave)?.titulo ?? 'Etapa') + ' (agora)', chave, 'atual')} />
+                  dados={v1.novos.porEtapa.map(e => ({ chave: e.coluna_id ?? 'sem', nome: nomeEtapa(e.titulo), valor: e.total }))}
+                  onClick={chave => abrirLista(nomeEtapa(v1.novos.porEtapa.find(e => (e.coluna_id ?? 'sem') === chave)?.titulo ?? 'Etapa') + ' (agora)', chave, 'atual')} />
               </Painel>
               <Painel titulo="Leads novos — renda e status" desc="Quantos responderam, em qual etapa estão e a renda familiar média informada." semPadding>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 1, background: 'var(--line)', borderBottom: '1px solid var(--line)' }}>
@@ -289,7 +285,7 @@ export default function Relatorios() {
                       {v1.novos.porEtapa.length === 0 && <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: 'var(--muted)' }}>Sem leads no período.</td></tr>}
                       {v1.novos.porEtapa.map(e => (
                         <tr key={e.titulo}>
-                          <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>{e.titulo}</td>
+                          <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>{nomeEtapa(e.titulo)}</td>
                           <td style={td}>{e.total}</td><td style={td}>{e.responderam}</td>
                           <td style={td}>{e.renda_media != null ? BRL(e.renda_media) : '—'}</td>
                         </tr>
