@@ -55,7 +55,8 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
     apiFetch<ContatoIgnorado[]>('/api/contatos-whatsapp/ignorados', token).then(setIgnorados).catch(() => {});
   };
 
-  if (!espelho) return null;
+  // No número de dono/gerente o card nasce direto (sem lista de pendentes).
+  if (!espelho || souGestor) return null;
 
   const trazer = async (c: ContatoPendente) => {
     setOcupado(c.id);
@@ -121,7 +122,7 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
       {aberto && (
         <div style={{ padding: '0 12px 10px' }}>
           <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 4px 8px', lineHeight: 1.5 }}>
-            Quem não é lead não entra no CRM sozinho. Só você vê esta lista{souGestor ? '.' : ' — o gestor não.'}
+            Quem não é lead não entra no CRM sozinho. Só você vê esta lista — o gestor não.
           </p>
           {pendentes.length === 0 && (
             <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 4px 6px' }}>Nenhum contato novo.</p>

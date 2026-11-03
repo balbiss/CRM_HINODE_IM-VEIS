@@ -368,7 +368,14 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
 
   // WhatsApp pessoal do corretor: número desconhecido NÃO vira lead sozinho (pode ser família,
   // amigo...). Fica na lista privada dele até ele decidir "trazer pro CRM" ou "é pessoal".
+  // Número pessoal de DONO/GERENTE (ex: campanha de WhatsApp do gerente, igual na v1): quem escreve
+  // já vira card na carteira dele, sem passar pela lista de pendentes e sem roleta (pedido do dono 11-03).
+  let numeroDeGestor = false;
   if (!lead && espelhoDeCorretor) {
+    const [dono] = await db.select({ role: perfis.role }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
+    numeroDeGestor = dono?.role === 'dono' || dono?.role === 'gerente';
+  }
+  if (!lead && espelhoDeCorretor && !numeroDeGestor) {
     if (!fromMe) {
       // v1 "possível duplicidade": quem escreveu já é lead de OUTRO corretor (ou está sem dono / rebatida)
       // → dono e gerente decidem se transferem. Um aviso por lead por dia.

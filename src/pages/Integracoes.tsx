@@ -153,7 +153,7 @@ export default function Integracoes() {
           </Bloco>
 
           <Bloco titulo={modo === 'central' ? 'Números da imobiliária' : 'Números dos corretores'}
-            desc={modo === 'central' ? 'Conecte pelo WhatsApp não oficial (QR code), pela API oficial ou pelos dois no mesmo número — o CRM escolhe sozinho por onde cada mensagem sai.' : 'Cada corretor conecta o próprio WhatsApp lendo o QR code. Dono e gerente também podem conectar o deles — quem escrever e ainda não for lead aparece só pra vocês em Conversas, em "Contatos novos".'}>
+            desc={modo === 'central' ? 'Conecte pelo WhatsApp não oficial (QR code), pela API oficial ou pelos dois no mesmo número — o CRM escolhe sozinho por onde cada mensagem sai.' : 'Cada corretor conecta o próprio WhatsApp lendo o QR code. Dono e gerente também podem conectar o deles (ex: campanha de WhatsApp): quem escrever pra esse número já vira card na carteira de quem conectou, sem passar pela roleta.'}>
             <ConexaoWhatsapp modo={modo} />
           </Bloco>
 
