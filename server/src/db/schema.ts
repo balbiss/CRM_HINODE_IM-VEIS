@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, integer, numeric, timestamp, date, pgEnum, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, numeric, timestamp, date, pgEnum, jsonb, index, uniqueIndex, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
 export const roleEnum = pgEnum('role', ['dono', 'gerente', 'corretor']);
@@ -439,6 +439,9 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   // Áudio do cliente transcrito (feito quando o Agente de IA está atendendo) — a IA lê e o corretor também.
   transcricao: text('transcricao'),
   canal: mensagemCanalEnum('canal').notNull().default('corretor'),
+  // "Responder" igual ao WhatsApp: a mensagem que esta cita (vale nos dois sentidos — o corretor
+  // respondendo pelo CRM e o lead respondendo uma mensagem específica no celular dele).
+  respostaA: uuid('resposta_a').references((): AnyPgColumn => mensagensWhatsapp.id, { onDelete: 'set null' }),
   // id da mensagem no CRM OKA (v1) — importação idempotente
   okaId: uuid('oka_id').unique(),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),

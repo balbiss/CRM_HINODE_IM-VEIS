@@ -17,6 +17,7 @@ import { EmojiPicker } from '../components/EmojiPicker';
 import { ContatosPendentes, useContatosWhatsapp } from '../components/ContatosPendentes';
 import { apiFetch } from '../lib/api';
 import { AvisoJanelaOficial } from '../components/WhatsappOficial';
+import { BarraResposta, BotaoResponder, CitacaoNoBalao, useResponderNoBalao } from '../components/RespostaMensagem';
 
 export default function Conversas() {
   const allLeads = useAppStore(s => s.leads);
@@ -44,6 +45,7 @@ export default function Conversas() {
   const { isManager, meNome } = useRoleInfo();
   const ask = useAppStore(s => s.ask);
   const contatos = useContatosWhatsapp();
+  const responderNoBalao = useResponderNoBalao(convId ?? '');
 
   const thread = (l: Lead) => chats[l.id] || [];
 
@@ -234,10 +236,12 @@ export default function Conversas() {
                         <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
                       </div>
                     )}
-                    <div style={css(m.rowStyle)}>
-                      <span style={css(m.bubbleStyle)}>
+                    <div className="linha-msg" style={{ ...css(m.rowStyle), alignItems: 'center' }}>
+                      <BotaoResponder leadId={CL.id} msgId={m.id} out={m.out} />
+                      <span {...responderNoBalao(m.id)} title="Clique 2 vezes pra responder" style={css(m.bubbleStyle)}>
                         {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Follow-up automático</span>}
                         {m.ia && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Agente de IA</span>}
+                        {m.respostaA && <CitacaoNoBalao id={m.respostaA} msgs={thread(CL)} leadNome={CL.nome} out={m.out} />}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFim} />}
                         {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
                         {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
@@ -258,6 +262,7 @@ export default function Conversas() {
               </div>
               <div style={{ borderTop: '1px solid var(--line)', padding: '14px 18px', position: 'relative', background: 'var(--card)', flex: 'none' }}>
                 <AvisoJanelaOficial leadId={CL.id} qtdMensagens={convThread.length} />
+                <BarraResposta leadId={CL.id} msgs={thread(CL)} leadNome={CL.nome} />
                 <MensagensProntas draft={convDraft || ''} setDraft={setConvDraft} leadId={CL.id} leadNome={CL.nome} />
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
@@ -300,7 +305,7 @@ export default function Conversas() {
                       }
                     }}
                   />
-                  <input value={convDraft} onChange={e => setConvDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendConv()} placeholder="Mensagem · digite / pras mensagens prontas" style={{ flex: 1, minWidth: 0, padding: '11px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                  <input data-campo-chat value={convDraft} onChange={e => setConvDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendConv()} placeholder="Mensagem · digite / pras mensagens prontas" style={{ flex: 1, minWidth: 0, padding: '11px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
                   <button onClick={sendConv} style={{ padding: '11px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, flex: 'none' }}>Enviar</button>
                 </div>
               </div>

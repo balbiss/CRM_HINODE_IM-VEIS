@@ -80,6 +80,7 @@ export function mensagensRouter(io: SocketServer) {
     anexoUrl: z.string().min(1).optional(),
     anexoTipo: z.enum(['imagem', 'video', 'documento', 'audio']).optional(),
     anexoNome: z.string().optional(),
+    respostaA: z.string().uuid().optional(), // "responder" uma mensagem, igual ao WhatsApp
   }).refine(b => !!b.texto || !!b.anexoUrl, { message: 'Mensagem precisa ter texto ou anexo' });
 
   router.post('/:leadId', async (req, res) => {
@@ -90,8 +91,14 @@ export function mensagensRouter(io: SocketServer) {
     if (lead === null) return res.status(404).json({ error: 'Lead não encontrado' });
     if (lead === undefined) return res.status(403).json({ error: 'Sem permissão para enviar nesta conversa' });
 
+    // a mensagem citada tem que ser desta mesma conversa
+    const [citada] = parsed.data.respostaA
+      ? await db.select().from(mensagensWhatsapp).where(and(eq(mensagensWhatsapp.id, parsed.data.respostaA), eq(mensagensWhatsapp.leadId, lead.id))).limit(1)
+      : [];
+
     const [row] = await db.insert(mensagensWhatsapp).values({
       leadId: req.params.leadId, direcao: 'out', canal: 'corretor', enviadoPor: sub, ackStatus: 1,
+      respostaA: citada?.id ?? null,
       texto: parsed.data.texto ?? null,
       anexoUrl: parsed.data.anexoUrl ?? null,
       anexoTipo: parsed.data.anexoTipo ?? null,
@@ -107,6 +114,7 @@ export function mensagensRouter(io: SocketServer) {
     despacharPeloWhatsapp({
       imobiliariaId, leadId: lead.id, telefone: lead.telefone, corretorId: lead.corretorId, sessaoWhatsappId: lead.sessaoWhatsappId,
       texto: parsed.data.texto, anexoUrl: parsed.data.anexoUrl, anexoTipo: parsed.data.anexoTipo, anexoNome: parsed.data.anexoNome,
+      citar: citada ? { waId: citada.waMessageId, chave: citada.waChave, deMim: citada.direcao === 'out' } : null,
     })
       .then(async r => {
         // grava o id do WhatsApp: o "visto" passa a atualizar e o eco que volta não duplica a mensagem

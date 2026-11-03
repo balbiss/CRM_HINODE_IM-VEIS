@@ -327,8 +327,10 @@ export default function Followup() {
                 <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', padding: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <p style={fieldLabel}>Passos da régua</p>
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Variáveis: {'{nome} {corretor} {origem} {bairro} {imovel_titulo} {imovel_preco} {imovel_foto}'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Variáveis: {'{nome} {corretor} {origem} {bairro} {imovel_titulo} {imovel_preco} {imovel_foto} {criativo}'}</span>
                   </div>
+                  <AvisoCriativo />
+                  <div style={{ height: 12 }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {rasc.passos.map((p, i) => {
                       const Icon = TIPOS.find(t => t.v === p.tipo)?.Icon ?? MessageSquare;
@@ -355,7 +357,19 @@ export default function Followup() {
                             <button onClick={() => { patch({ passos: rasc.passos.filter((_, j) => j !== i) }); }} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={12} /></button>
                           </div>
                           {p.tipo === 'texto' ? (
-                            <textarea value={p.conteudo} onChange={e => patchPasso(i, { conteudo: e.target.value })} rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Mensagem…" />
+                            <>
+                              <textarea value={p.conteudo} onChange={e => patchPasso(i, { conteudo: e.target.value })} rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Mensagem…" />
+                              {/\{criativo\}/i.test(p.conteudo) ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 11.5, color: 'var(--olive)', fontWeight: 600 }}>
+                                  <ImageIcon size={12} /> Vai junto a imagem do anúncio de onde o lead veio
+                                  <button onClick={() => patchPasso(i, { conteudo: p.conteudo.replace(/\n?\s*\{criativo\}\s*/gi, '').trim() })} style={{ border: 'none', background: 'none', color: 'var(--muted)', fontSize: 11.5, textDecoration: 'underline', padding: 0 }}>tirar</button>
+                                </span>
+                              ) : (
+                                <button onClick={() => patchPasso(i, { conteudo: (p.conteudo.trim() ? p.conteudo.trim() + '\n' : '') + '{criativo}' })} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, padding: '5px 10px', border: '1px dashed var(--terra)', borderRadius: 20, background: 'none', fontSize: 11.5, fontWeight: 600, color: 'var(--terra)' }}>
+                                  <ImageIcon size={12} /> Inserir criativo da campanha
+                                </button>
+                              )}
+                            </>
                           ) : (
                             <>
                               <PassoAnexo passo={p} onChange={patch => patchPasso(i, patch)} />
@@ -386,6 +400,30 @@ export default function Followup() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** OBS com o passo a passo de mandar a imagem do anúncio no follow-up ({criativo}). */
+function AvisoCriativo() {
+  const [aberto, setAberto] = useState(false);
+  const li = { margin: '0 0 6px', lineHeight: 1.55 } as const;
+  return (
+    <div style={{ border: '1px solid #E8C9A8', background: '#FFF6EC', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: '#5B3A1A' }}>
+      <button onClick={() => setAberto(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', border: 'none', background: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: '#5B3A1A', textAlign: 'left' }}>
+        <ImageIcon size={14} /> OBS: como mandar a imagem do anúncio sozinho no follow-up
+        <span style={{ marginLeft: 'auto', fontWeight: 600, textDecoration: 'underline' }}>{aberto ? 'fechar' : 'ver passo a passo'}</span>
+      </button>
+      {aberto && (
+        <ol style={{ margin: '10px 0 2px', paddingLeft: 18 }}>
+          <li style={li}>Em <strong>Campanhas</strong>, cole o link da <strong>pasta do Google Drive</strong> com as imagens dos anúncios (compartilhada como "Qualquer pessoa com o link").</li>
+          <li style={li}>No Drive, cada imagem precisa ter o <strong>mesmo nome do anúncio na Meta</strong> (ex.: anúncio "[CN 38] [SETE SÓIS]" → arquivo "[CN 38] [SETE SÓIS].jpg"). É assim que o CRM sabe qual imagem é de qual lead.</li>
+          <li style={li}>Aqui no passo de <strong>Texto</strong>, escreva a mensagem e clique em <strong>"Inserir criativo da campanha"</strong> (ou digite <code>{'{criativo}'}</code>).<br />Ex.: <em>"Oi {'{nome}'}, lembra desse anúncio? Ainda tem unidades 👇"</em> + <code>{'{criativo}'}</code></li>
+          <li style={li}>Quando o passo sair, o CRM manda a <strong>imagem do anúncio de onde aquele lead veio</strong> com o texto como legenda. Cada lead recebe a imagem da campanha dele.</li>
+          <li style={li}>Se o lead <strong>não tiver criativo</strong> (veio direto do WhatsApp, ou o nome no Drive não bate), vai <strong>só o texto</strong> — a régua não trava. Se o passo tiver só o <code>{'{criativo}'}</code> sem texto, ele é pulado.</li>
+          <li style={{ ...li, marginBottom: 0 }}>Se o criativo do anúncio for <strong>vídeo</strong>, vai a <strong>capa</strong> dele (imagem). Dica: confira no card do lead se o criativo aparece — se aparece lá, o follow-up também manda.</li>
+        </ol>
       )}
     </div>
   );

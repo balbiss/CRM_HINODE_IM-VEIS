@@ -179,7 +179,7 @@ export async function presenca(sessionName: string, chatIdAlvo: string, acao: 'v
 /** Envia texto usando o chatId que o próprio WhatsApp resolve (check-exists, pode ser @lid) —
  *  evita o "no LID found" com contato que nunca falou com o número. Devolve o id da mensagem.
  *  Lança 'NUMERO_INEXISTENTE' se o número não tem WhatsApp. */
-export async function enviarTextoResolvido(sessionName: string, numero: string, texto: string, chatIdPronto?: string): Promise<{ id: string | null }> {
+export async function enviarTextoResolvido(sessionName: string, numero: string, texto: string, chatIdPronto?: string, replyTo?: string): Promise<{ id: string | null }> {
   let alvo = chatIdPronto;
   if (!alvo) {
     const r = await resolverChatId(sessionName, numero);
@@ -187,7 +187,7 @@ export async function enviarTextoResolvido(sessionName: string, numero: string, 
     alvo = r.chatId;
   }
   const r = await waha<{ id?: string | { _serialized?: string }; key?: { id?: string } }>('/api/sendText', {
-    method: 'POST', body: { session: sessionName, chatId: alvo, text: texto },
+    method: 'POST', body: { session: sessionName, chatId: alvo, text: texto, ...(replyTo ? { reply_to: replyTo } : {}) },
   });
   const id = typeof r?.id === 'string' ? r.id : r?.id?._serialized || r?.key?.id || null;
   return { id };
@@ -244,7 +244,7 @@ export async function baixarMidiaMensagem(sessionName: string, chatId: string, m
   }
 }
 
-export async function enviarMidia(sessionName: string, numero: string, url: string, tipo: 'imagem' | 'video' | 'documento' | 'audio', legenda?: string, nomeArquivo?: string) {
+export async function enviarMidia(sessionName: string, numero: string, url: string, tipo: 'imagem' | 'video' | 'documento' | 'audio', legenda?: string, nomeArquivo?: string, replyTo?: string) {
   const endpoint = tipo === 'imagem' ? '/api/sendImage' : tipo === 'video' ? '/api/sendVideo' : tipo === 'audio' ? '/api/sendVoice' : '/api/sendFile';
   const mimetype = tipo === 'audio' ? 'audio/ogg; codecs=opus' : undefined;
   const filename = tipo === 'documento' ? (nomeArquivo || url.split('/').pop()) : undefined;
@@ -254,5 +254,6 @@ export async function enviarMidia(sessionName: string, numero: string, url: stri
   const body: Record<string, unknown> = { session: sessionName, chatId: chatId(numero), file };
   if (tipo !== 'audio' && legenda) body.caption = legenda;
   if (tipo === 'audio') body.convert = true; // WAHA converte se não estiver no formato certo
+  if (replyTo) body.reply_to = replyTo;
   return waha(endpoint, { method: 'POST', body });
 }

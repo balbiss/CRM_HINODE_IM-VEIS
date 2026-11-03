@@ -392,6 +392,7 @@ export async function processarWebhook(io: SocketServer, body: any) {
           pushName: fromMe ? '' : (nomes.get(contato) || '').trim(),
           anexoTipo: anexo.tipo,
           anexoNome: anexo.nome,
+          citadoId: msg.context?.id ?? null,
           baixarMidia: () => (anexo.mediaId ? baixarMidiaOficial(sessao, anexo.mediaId) : Promise.resolve(null)),
         });
       }

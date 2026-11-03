@@ -394,3 +394,18 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
 - Robô: toda meia-noite (Brasília) e 2 min após o boot relê as pastas e guarda as miniaturas novas.
 - `GET /api/criativos/lead/:id` (bloco "Anúncio que trouxe esse lead" no card), `POST /api/criativos/casar` (Campanhas).
 - Facebook: `campanha` do lead passou a ser o NOME DO ANÚNCIO (`ad_name || campaign_name`), igual à v1.
+
+## 2026-11-02 — Follow-up com {criativo} e "Responder" mensagem no chat
+
+- **`{criativo}` no follow-up** (`lib/followup.ts` → `criativoParaLead` em `lib/criativos.ts`): o passo com `{criativo}`
+  manda a imagem do anúncio de onde o lead veio (casa `lead.campanha` com a pasta do Drive, igual ao card). A imagem sai do
+  MinIO (`criativos/envio/<id>.jpg`, Drive `thumbnail?sz=w1600`, baixada 1x); criativo em vídeo → manda a capa. Sem criativo:
+  vai só o texto; passo só com `{criativo}` e sem criativo é **pulado** (`registrarEnvio(..., pulado=true)` não conta chamada
+  nem ritmo). Editor: botão "Inserir criativo da campanha" + OBS com passo a passo (`AvisoCriativo` em `pages/Followup.tsx`).
+- **Responder mensagem**: coluna `mensagens_whatsapp.resposta_a` (migração 0054, FK pra própria tabela, set null).
+  `POST /api/mensagens/:leadId` aceita `respostaA` (precisa ser da mesma conversa) e manda citado:
+  oficial = `context.message_id` (só se a citada tiver wamid); WAHA = `reply_to` (id WAHA, ou montado
+  `true|false_<chatId>_<chave>` quando a citada entrou pela oficial). Recebidas: WAHA `replyTo.id`/`contextInfo.stanzaID`,
+  oficial `context.id` → acha a citada pelo `wa_message_id` ou `wa_chave`.
+  Front: `components/RespostaMensagem.tsx` (2 cliques no balão / setinha; barra "Respondendo…"; citação clicável) nas
+  Conversas e no chat do card; estado `respondendo` no store, `enviarMensagem` anexa sozinho (texto, anexo, áudio, prontas).

@@ -8,6 +8,7 @@ import { BRL, canalPill, thumb } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from './AnexoMensagem';
+import { BarraResposta, BotaoResponder, CitacaoNoBalao, useResponderNoBalao } from './RespostaMensagem';
 import { Visto } from './Visto';
 import { ChatAvatar } from './ChatAvatar';
 import { AudioRecordButton } from './AudioRecordButton';
@@ -60,6 +61,7 @@ export function LeadModal() {
   const [tarefaQuando, setTarefaQuando] = useState('');
 
   const L = leads.find(l => l.id === leadId);
+  const responderNoBalao = useResponderNoBalao(leadId ?? '');
   const chatMsgs = mapMsgs((leadId && chats[leadId]) || []);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const paraOFimChat = () => {
@@ -202,10 +204,12 @@ export function LeadModal() {
                         <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
                       </div>
                     )}
-                    <div style={css(m.rowStyle)}>
-                      <span style={css(m.bubbleStyle)}>
+                    <div className="linha-msg" style={{ ...css(m.rowStyle), alignItems: 'center' }}>
+                      <BotaoResponder leadId={L.id} msgId={m.id} out={m.out} />
+                      <span {...responderNoBalao(m.id)} title="Clique 2 vezes pra responder" style={css(m.bubbleStyle)}>
                         {m.bot && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Follow-up automático</span>}
                         {m.ia && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(255,255,255,.18)', padding: '3px 8px', borderRadius: 20, marginBottom: 7 }}>Agente de IA</span>}
+                        {m.respostaA && <CitacaoNoBalao id={m.respostaA} msgs={(leadId && chats[leadId]) || []} leadNome={L.nome} out={m.out} />}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFimChat} />}
                         {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
                         {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
@@ -225,6 +229,7 @@ export function LeadModal() {
                 
               </div>
               <AvisoJanelaOficial leadId={L.id} qtdMensagens={chatMsgs.length} />
+              <BarraResposta leadId={L.id} msgs={(leadId && chats[leadId]) || []} leadNome={L.nome} />
               <div style={{ position: 'relative' }}>
                 <MensagensProntas draft={draft} setDraft={setDraft} leadId={L.id} leadNome={L.nome} aberto={prontasAbertas} onFechar={() => setProntasAbertas(false)} bottom={8} />
               </div>
@@ -273,7 +278,7 @@ export function LeadModal() {
                     }
                   }}
                 />
-                <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} placeholder="Escreva uma mensagem… (/ = mensagens prontas)" style={{ flex: 1, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                <input data-campo-chat value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} placeholder="Escreva uma mensagem… (/ = mensagens prontas)" style={{ flex: 1, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
                 <button onClick={sendMsg} style={{ padding: '12px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Enviar</button>
               </div>
             </>

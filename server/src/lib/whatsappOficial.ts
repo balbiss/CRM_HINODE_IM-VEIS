@@ -236,7 +236,22 @@ export async function janelaAberta(leadId: string): Promise<boolean> {
 }
 
 export type TipoAnexo = 'imagem' | 'video' | 'documento' | 'audio';
-export type Conteudo = { texto?: string | null; anexoUrl?: string | null; anexoTipo?: TipoAnexo | null; anexoNome?: string | null };
+/** Mensagem que está sendo respondida ("responder" do WhatsApp): o id que temos dela e de que lado veio. */
+export type Citacao = { waId: string | null; chave: string | null; deMim: boolean };
+export type Conteudo = { texto?: string | null; anexoUrl?: string | null; anexoTipo?: TipoAnexo | null; anexoNome?: string | null; citar?: Citacao | null };
+
+/** A oficial só cita pelo wamid. Mensagem que entrou pelo WAHA não tem wamid — vai sem citação. */
+function citacaoOficial(c?: Citacao | null) {
+  return c?.waId?.startsWith('wamid.') ? { context: { message_id: c.waId } } : {};
+}
+
+/** O WAHA cita pelo id dele ("true_<chat>_<ID>"). Se a mensagem entrou pela oficial, monta o id a
+ *  partir da chave interna (é o mesmo ID nos dois lados) e do chat já resolvido. */
+function citacaoWaha(c: Citacao | null | undefined, alvo: string): string | undefined {
+  if (!c) return undefined;
+  if (c.waId && !c.waId.startsWith('wamid.')) return c.waId;
+  return c.chave ? `${c.deMim ? 'true' : 'false'}_${alvo}_${c.chave}` : undefined;
+}
 
 async function enviarOficial(sessao: Sessao, telefone: string, c: Conteudo): Promise<string | null> {
   const to = destinoOficial(telefone);
@@ -251,7 +266,7 @@ async function enviarOficial(sessao: Sessao, telefone: string, c: Conteudo): Pro
     corpo = { type: 'text', text: { body: c.texto || '', preview_url: true } };
   }
   const r = await graph<{ messages?: { id: string }[]; contacts?: { wa_id: string }[] }>(`/${sessao.oficialPhoneNumberId}/messages`, tokenDa(sessao), {
-    method: 'POST', body: { messaging_product: 'whatsapp', recipient_type: 'individual', to, ...corpo },
+    method: 'POST', body: { messaging_product: 'whatsapp', recipient_type: 'individual', to, ...corpo, ...citacaoOficial(c.citar) },
   });
   if (r.contacts?.[0]?.wa_id) lembrarWaId(r.contacts[0].wa_id);
   return r.messages?.[0]?.id ?? null;
@@ -344,8 +359,9 @@ export async function enviarAoLead(sessao: Sessao, lead: { id: string; telefone:
       alvo = r.chatId;
     }
     let id: string | null = null;
-    if (c.anexoUrl && c.anexoTipo) id = idWaha(await enviarMidiaWaha(sessao.sessionName, alvo, c.anexoUrl, c.anexoTipo, c.texto ?? undefined, c.anexoNome ?? undefined));
-    else id = (await enviarTextoResolvido(sessao.sessionName, lead.telefone, c.texto || '', alvo)).id;
+    const replyTo = citacaoWaha(c.citar, alvo);
+    if (c.anexoUrl && c.anexoTipo) id = idWaha(await enviarMidiaWaha(sessao.sessionName, alvo, c.anexoUrl, c.anexoTipo, c.texto ?? undefined, c.anexoNome ?? undefined, replyTo));
+    else id = (await enviarTextoResolvido(sessao.sessionName, lead.telefone, c.texto || '', alvo, replyTo)).id;
     const chave = chaveDaMensagem(id);
     if (chave) reservarChave(lead.telefone, chave);
     return { id, chave, via: 'waha' };

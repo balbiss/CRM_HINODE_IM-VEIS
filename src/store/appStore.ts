@@ -92,6 +92,7 @@ export interface RemoteMensagem {
   anexoUrl: string | null; anexoTipo: AnexoTipo | null; anexoNome?: string | null; canal: 'corretor' | 'followup' | 'ia'; enviadoEm: string;
   ackStatus?: number | null;
   transcricao?: string | null;
+  respostaA?: string | null;
 }
 
 /** Resumo da última mensagem de um lead — usado só pra saber QUAIS leads já tiveram interação
@@ -107,6 +108,7 @@ function mapRemoteMensagem(r: RemoteMensagem): ChatMsg {
   return {
     id: r.id, side: r.direcao, texto: r.texto ?? '', hora: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     bot: r.canal === 'followup', ia: r.canal === 'ia', off, anexoUrl: r.anexoUrl, anexoTipo: r.anexoTipo, anexoNome: r.anexoNome ?? undefined, ack: r.ackStatus ?? undefined, transcricao: r.transcricao ?? undefined,
+    respostaA: r.respostaA ?? null,
   };
 }
 
@@ -207,6 +209,9 @@ interface AppState {
   convQuery: string;
   convCorretor: string;
   convTyping: boolean;
+  /** "Responder" igual ao WhatsApp: mensagem escolhida (2 cliques no balão) pra citar no próximo envio. */
+  respondendo: { leadId: string; msgId: string } | null;
+  setRespondendo: (v: { leadId: string; msgId: string } | null) => void;
 
   discardOpen: boolean;
   discardWarn: string | null;
@@ -559,6 +564,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   bolsaoTab: 'rebatidas',
 
   convId: null, convDraft: '', convQuery: '', convCorretor: 'Todos os corretores', convTyping: false,
+  respondendo: null,
+  setRespondendo: v => set({ respondendo: v }),
 
   discardOpen: false, discardWarn: null,
   moverPendente: null, vendaLeadId: null, descarteLeadId: null, aprovacoes: [], alertasModal: [], compromissos: [],
@@ -1114,10 +1121,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!token) return;
     const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
     const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const otimista: ChatMsg = { id: tempId, side: 'out', texto: input.texto ?? '', hora, off: 0, anexoUrl: input.anexoUrl ?? null, anexoTipo: input.anexoTipo ?? null, anexoNome: input.anexoNome ?? null };
+    // respondendo uma mensagem desta conversa? vai citada (texto, anexo, áudio ou mensagem pronta)
+    const resp = get().respondendo;
+    const respostaA = resp && resp.leadId === leadId && !resp.msgId.startsWith('temp-') ? resp.msgId : null;
+    if (resp && resp.leadId === leadId) set({ respondendo: null });
+    const otimista: ChatMsg = { id: tempId, side: 'out', texto: input.texto ?? '', hora, off: 0, anexoUrl: input.anexoUrl ?? null, anexoTipo: input.anexoTipo ?? null, anexoNome: input.anexoNome ?? null, respostaA };
     set(s => ({ chats: { ...s.chats, [leadId]: [...(s.chats[leadId] || []), otimista] } }));
     try {
-      const row = await apiFetch<RemoteMensagem>('/api/mensagens/' + leadId, token, { method: 'POST', body: JSON.stringify(input) });
+      const row = await apiFetch<RemoteMensagem>('/api/mensagens/' + leadId, token, { method: 'POST', body: JSON.stringify(respostaA ? { ...input, respostaA } : input) });
       set(s => {
         const lista = s.chats[leadId] || [];
         const jaVeio = lista.some(m => m.id === row.id);

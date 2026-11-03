@@ -1,7 +1,7 @@
 import { uploadFile, urlPublica, existeArquivo } from './storage.js';
 import { db } from '../db/client.js';
 import { imobiliarias } from '../db/schema.js';
-import { isNotNull } from 'drizzle-orm';
+import { eq, isNotNull } from 'drizzle-orm';
 
 /** Criativos dos anúncios a partir de uma pasta do Google Drive compartilhada como
  *  "qualquer pessoa com o link" — sem login do Google nem chave de API: lê a listagem pública
@@ -127,6 +127,35 @@ export async function guardarMiniatura(id: string): Promise<string> {
   const u = await uploadFile(key, Buffer.from(await r.arrayBuffer()), tipo);
   miniaturas.set(id, u);
   return u;
+}
+
+/** Imagem do criativo em tamanho bom pra mandar no WhatsApp (o follow-up usa {criativo}). Guarda
+ *  no MinIO na 1ª vez. Se o criativo for vídeo, vai a capa dele (a imagem do 1º quadro). */
+export async function imagemParaEnvio(id: string): Promise<string> {
+  const key = `criativos/envio/${id}.jpg`;
+  if (await existeArquivo(key)) return urlPublica(key);
+  const r = await fetch(`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`, {
+    redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (CRM Hinode; criativos)' },
+  });
+  const tipo = r.headers.get('content-type') || '';
+  if (!r.ok || !tipo.startsWith('image/')) throw new Error('Drive não entregou a imagem (' + r.status + ')');
+  return uploadFile(key, Buffer.from(await r.arrayBuffer()), tipo);
+}
+
+/** Criativo do anúncio de onde o lead veio, pronto pra enviar — null se não tiver pasta, se o
+ *  nome não casar ou se o Drive falhar (quem chama segue só com o texto). */
+export async function criativoParaLead(imobiliariaId: string, campanha: string | null | undefined): Promise<string | null> {
+  if (!campanha?.trim()) return null;
+  try {
+    const [im] = await db.select({ pasta: imobiliarias.criativosPastaUrl }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
+    if (!im?.pasta) return null;
+    const achados = casarCriativos(campanha, await listarCriativos(im.pasta));
+    const escolhido = achados.find(a => a.tipo === 'imagem') || achados.find(a => a.tipo === 'video');
+    return escolhido ? await imagemParaEnvio(escolhido.id) : null;
+  } catch (e) {
+    console.error('criativo p/ follow-up:', (e as Error).message);
+    return null;
+  }
 }
 
 /** Relê a pasta de todas as imobiliárias e guarda as miniaturas que faltam (roda à meia-noite). */

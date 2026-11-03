@@ -20,6 +20,7 @@ import {
   leads, perfis, imobiliarias, colunasKanban, mensagensWhatsapp, sessoesWhatsapp, notificacoes, imoveis,
 } from '../db/schema.js';
 import { registrarEvento } from './eventos.js';
+import { criativoParaLead } from './criativos.js';
 
 type Exec = typeof followupExecucoes.$inferSelect;
 type Passo = typeof followupPassos.$inferSelect;
@@ -426,7 +427,9 @@ async function enviarPasso(io: SocketServer, ex: Exec): Promise<boolean> {
     ? await db.select().from(imoveis).where(and(eq(imoveis.imobiliariaId, ex.imobiliariaId), eq(imoveis.referenciaAnuncio, origem))).limit(1)
     : [];
   const pedeFoto = /\{imovel_foto\}/i.test(passo.conteudo || '');
-  const semFoto = (passo.conteudo || '').replace(/\n?\s*\{imovel_foto\}\s*\n?/gi, '\n').trim();
+  // {criativo} = a imagem do anúncio de onde o lead veio (pasta do Drive em Campanhas)
+  const pedeCriativo = /\{criativo\}/i.test(passo.conteudo || '');
+  const semFoto = (passo.conteudo || '').replace(/\n?\s*\{(imovel_foto|criativo)\}\s*\n?/gi, '\n').trim();
   const texto = semFoto ? renderTemplate(semFoto, {
     nome: primeiroNome(lead.nome), corretor: corr?.nome ?? '', origem, bairro: lead.bairroInteresse ?? '',
     imovel_titulo: imovel?.titulo ?? '', imovel_descricao: imovel?.descricao ?? '',
@@ -435,8 +438,18 @@ async function enviarPasso(io: SocketServer, ex: Exec): Promise<boolean> {
   let anexoUrl = passo.anexoUrl ?? null;
   let anexoTipo = normalizarTipo(passo.anexoTipo ?? passo.tipo);
   let anexoNome = passo.anexoNome ?? null;
+  if (!anexoUrl && pedeCriativo) {
+    const url = await criativoParaLead(ex.imobiliariaId, lead.campanha);
+    if (url) { anexoUrl = url; anexoTipo = 'imagem'; anexoNome = 'anuncio.jpg'; }
+  }
   if (!anexoUrl && pedeFoto && imovel?.imagens?.[0]) { anexoUrl = imovel.imagens[0]; anexoTipo = 'imagem'; anexoNome = 'foto-imovel.jpg'; }
   if (!anexoUrl) anexoTipo = null;
+  // passo que era SÓ o {criativo} e o lead não tem criativo (veio do WhatsApp, nome não casou): pula
+  // o passo em vez de travar a régua
+  if (!texto && !anexoUrl && pedeCriativo) {
+    await registrarEnvio(io, ex, '(passo pulado — esse lead não tem criativo de anúncio)', null, null, true);
+    return true;
+  }
   if (!texto && !anexoUrl) { await registrarErro(io, ex, 'passo sem texto nem anexo'); return false; }
 
   const { despacharPeloWhatsapp } = await import('../routes/whatsapp.js');
@@ -474,17 +487,20 @@ function normalizarTipo(t: string | null | undefined): 'imagem' | 'video' | 'aud
 }
 
 /** v1 followup_registrar_envio: grava o envio, ritmo do corretor, +1 na cadência, próximo passo ou fim. */
-async function registrarEnvio(io: SocketServer, ex: Exec, texto: string, waMessageId: string | null, mensagemId: string | null) {
+async function registrarEnvio(io: SocketServer, ex: Exec, texto: string, waMessageId: string | null, mensagemId: string | null, pulado = false) {
   const agora = new Date();
   await db.insert(followupEnvios).values({ execucaoId: ex.id, passoOrdem: ex.passoAtual + 1, conteudoEnviado: texto, waMessageId, mensagemId });
-  const liberado = new Date(+agora + (40 + Math.floor(Math.random() * 21)) * 1000);
-  await db.insert(followupRitmoCorretor).values({ corretorId: ex.corretorId!, liberadoEm: liberado })
-    .onConflictDoUpdate({ target: followupRitmoCorretor.corretorId, set: { liberadoEm: liberado } });
-  const [l] = await db.update(leads).set({
-    cadenciaChamada: sql`least(${leads.cadenciaChamada} + 1, 5)`, dataUltimaChamada: agora, ultimaAcaoEm: agora,
-  }).where(eq(leads.id, ex.leadId)).returning();
-  if (l) {
-    await db.update(leads).set({ cadencia: 'Chamada ' + l.cadenciaChamada }).where(eq(leads.id, l.id));
+  // passo pulado (nada saiu pro lead): não conta como chamada nem segura o ritmo do corretor
+  if (!pulado) {
+    const liberado = new Date(+agora + (40 + Math.floor(Math.random() * 21)) * 1000);
+    await db.insert(followupRitmoCorretor).values({ corretorId: ex.corretorId!, liberadoEm: liberado })
+      .onConflictDoUpdate({ target: followupRitmoCorretor.corretorId, set: { liberadoEm: liberado } });
+    const [l] = await db.update(leads).set({
+      cadenciaChamada: sql`least(${leads.cadenciaChamada} + 1, 5)`, dataUltimaChamada: agora, ultimaAcaoEm: agora,
+    }).where(eq(leads.id, ex.leadId)).returning();
+    if (l) {
+      await db.update(leads).set({ cadencia: 'Chamada ' + l.cadenciaChamada }).where(eq(leads.id, l.id));
+    }
   }
 
   const passos = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId)).orderBy(asc(followupPassos.ordem));

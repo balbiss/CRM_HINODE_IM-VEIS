@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosPendentes, contatosIgnorados } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -134,9 +134,12 @@ export function whatsappRouter(io: SocketServer) {
         : null;
       const anexoNome: string | null = p.media?.filename || p._data?.Message?.documentMessage?.fileName || p._data?.Message?.documentMessage?.title || null;
       const chatIdMidia = String((fromMe ? p.to || info.Chat : p.from || info.Chat) || '');
+      // "responder" do WhatsApp: id da mensagem citada (WAHA normalizado ou contextInfo cru do GOWS)
+      const ctxInfo = (Object.values(p._data?.Message || {}) as any[]).find(x => x && typeof x === 'object' && x.contextInfo)?.contextInfo;
+      const citadoId: string | null = p.replyTo?.id || ctxInfo?.stanzaID || ctxInfo?.stanzaId || null;
 
       await processarMensagem(io, sessao, {
-        fromMe, numero, texto, waId: waId ?? null, pushName, anexoTipo, anexoNome,
+        fromMe, numero, texto, waId: waId ?? null, pushName, anexoTipo, anexoNome, citadoId,
         // a URL do WAHA (media.url) exige X-Api-Key — baixa aqui e sobe pro MinIO
         baixarMidia: () => (waId ? baixarMidiaMensagem(ev.session!, chatIdMidia, waId) : Promise.resolve(null)),
       });
@@ -326,6 +329,8 @@ export type MensagemWhatsapp = {
   pushName: string;
   anexoTipo: 'imagem' | 'video' | 'audio' | 'documento' | null;
   anexoNome: string | null;
+  /** id (WAHA ou wamid) da mensagem que esta responde, se o contato usou o "responder". */
+  citadoId?: string | null;
   baixarMidia: () => Promise<{ buffer: Buffer; mimetype: string; filename: string | null } | null>;
 };
 
@@ -503,8 +508,20 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
     ? await transcreverAudio(sessao.imobiliariaId, anexoUrl)
     : null;
 
+  // Citou uma mensagem? Acha ela nesta conversa pelo id ou pela chave interna (vale entre WAHA e oficial).
+  let respostaA: string | null = null;
+  if (m.citadoId) {
+    const chaveCitada = chaveDaMensagem(m.citadoId);
+    const [citada] = await db.select({ id: mensagensWhatsapp.id }).from(mensagensWhatsapp).where(and(
+      eq(mensagensWhatsapp.leadId, lead.id),
+      chaveCitada ? or(eq(mensagensWhatsapp.waMessageId, m.citadoId), eq(mensagensWhatsapp.waChave, chaveCitada)) : eq(mensagensWhatsapp.waMessageId, m.citadoId),
+    )).limit(1);
+    respostaA = citada?.id ?? null;
+  }
+
   const inseridas = await db.insert(mensagensWhatsapp).values({
     leadId: lead.id,
+    respostaA,
     direcao: fromMe ? 'out' : 'in',
     canal: 'corretor',
     waMessageId: waId ?? null,
@@ -556,6 +573,8 @@ export async function despacharPeloWhatsapp(opts: {
   anexoUrl?: string | null;
   anexoTipo?: 'imagem' | 'video' | 'documento' | 'audio' | null;
   anexoNome?: string | null;
+  /** "Responder": mensagem citada (vai como resposta no WhatsApp do lead). */
+  citar?: { waId: string | null; chave: string | null; deMim: boolean } | null;
 }): Promise<{ enviado: boolean; erro?: string; waMessageId?: string | null; waChave?: string | null; via?: string }> {
   const [imob] = await db.select({ modo: imobiliarias.modoWhatsapp }).from(imobiliarias).where(eq(imobiliarias.id, opts.imobiliariaId)).limit(1);
 

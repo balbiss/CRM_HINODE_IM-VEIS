@@ -186,10 +186,13 @@ export interface ChatMsg {
   ack?: number;
   /** Áudio transcrito (quando o Agente de IA estava atendendo). */
   transcricao?: string | null;
+  /** id da mensagem que esta responde ("responder" do WhatsApp). */
+  respostaA?: string | null;
 }
 
 export interface MappedMsg {
   id: string; texto: string; hora: string; stamp: string; sep: boolean; sepLabel: string; bot: boolean; ia: boolean;
+  respostaA?: string | null; out: boolean;
   rowStyle: string; bubbleStyle: string; anexoUrl?: string | null; anexoTipo?: AnexoTipo | null; anexoNome?: string | null;
   transcricao?: string | null;
   /** "visto" só nas mensagens enviadas: '' | '✓' (enviada) | '✓✓' (entregue) | '✓✓ azul' (lida). */
@@ -208,6 +211,7 @@ export function mapMsgs(arr: ChatMsg[]): MappedMsg[] {
     return {
       id: m.id, texto: m.texto, hora: m.hora, stamp: stamp(off, m.hora), sep, sepLabel: lab, bot: !!m.bot, ia: !!m.ia,
       anexoUrl: m.anexoUrl, anexoTipo: m.anexoTipo, anexoNome: m.anexoNome, visto, transcricao: m.transcricao,
+      respostaA: m.respostaA ?? null, out: m.side === 'out',
       rowStyle: 'display:flex;justify-content:' + (m.side === 'out' ? 'flex-end' : 'flex-start'),
       // balões sólidos com sombra leve e "bico" no canto, como no WhatsApp (ficam legíveis sobre o fundo com padrão)
       bubbleStyle: 'max-width:72%;padding:9px 13px 7px;border-radius:12px;font-size:13.5px;line-height:1.5;box-shadow:0 1px 1.5px rgba(0,0,0,.13);' +
