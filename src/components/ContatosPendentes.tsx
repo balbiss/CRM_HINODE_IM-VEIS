@@ -45,6 +45,7 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
   const token = useAppStore(s => s.token);
   const toast = useAppStore(s => s.toast);
   const ask = useAppStore(s => s.ask);
+  const souGestor = useAppStore(s => s.me?.role === 'dono' || s.me?.role === 'gerente');
   const [aberto, setAberto] = useState(true);
   const [verIgnorados, setVerIgnorados] = useState(false);
   const [ignorados, setIgnorados] = useState<ContatoIgnorado[]>([]);
@@ -120,7 +121,7 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
       {aberto && (
         <div style={{ padding: '0 12px 10px' }}>
           <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 4px 8px', lineHeight: 1.5 }}>
-            Quem não é lead não entra no CRM sozinho. Só você vê esta lista — o gestor não.
+            Quem não é lead não entra no CRM sozinho. Só você vê esta lista{souGestor ? '.' : ' — o gestor não.'}
           </p>
           {pendentes.length === 0 && (
             <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 4px 6px' }}>Nenhum contato novo.</p>

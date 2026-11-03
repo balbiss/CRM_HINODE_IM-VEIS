@@ -153,7 +153,7 @@ export default function Integracoes() {
           </Bloco>
 
           <Bloco titulo={modo === 'central' ? 'Números da imobiliária' : 'Números dos corretores'}
-            desc={modo === 'central' ? 'Conecte pelo WhatsApp não oficial (QR code), pela API oficial ou pelos dois no mesmo número — o CRM escolhe sozinho por onde cada mensagem sai.' : 'Cada corretor conecta o próprio WhatsApp lendo o QR code.'}>
+            desc={modo === 'central' ? 'Conecte pelo WhatsApp não oficial (QR code), pela API oficial ou pelos dois no mesmo número — o CRM escolhe sozinho por onde cada mensagem sai.' : 'Cada corretor conecta o próprio WhatsApp lendo o QR code. Dono e gerente também podem conectar o deles — quem escrever e ainda não for lead aparece só pra vocês em Conversas, em "Contatos novos".'}>
             <ConexaoWhatsapp modo={modo} />
           </Bloco>
 
@@ -646,7 +646,15 @@ function ConexaoWhatsapp({ modo }: { modo: ModoWhatsapp }) {
   const [qrPara, setQrPara] = useState<string | null>(null);
 
   const renomear = useAppStore(s => s.renomearSessaoWhatsapp);
-  const corretores = perfis.filter(p => p.role === 'corretor');
+  const me = useAppStore(s => s.me);
+  // Dono e gerente também podem conectar o próprio WhatsApp (pedido do dono 11-03):
+  // ganham a mesma lista privada de "Contatos novos" em Conversas. Gestores primeiro.
+  const ordemRole: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
+  const corretores = perfis
+    .filter(p => p.role === 'corretor' || p.role === 'gerente' || p.role === 'dono')
+    .sort((a, b) => (ordemRole[a.role] ?? 9) - (ordemRole[b.role] ?? 9));
+  const nomeNaLista = (p: { id: string; nome: string; role: string }) =>
+    p.nome + (p.role === 'dono' ? ' · Dono' : p.role === 'gerente' ? ' · Gerente' : '') + (p.id === me?.id ? ' (você)' : '');
   const centrais = sessoes.filter(s => s.escopo === 'central');
   const sessaoDoCorretor = (id: string) => sessoes.find(s => s.escopo === 'corretor' && s.corretorId === id);
 
@@ -742,7 +750,7 @@ function ConexaoWhatsapp({ modo }: { modo: ModoWhatsapp }) {
               ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Nenhum corretor cadastrado ainda.</p>
               : corretores.map(c => {
                   const s = sessaoDoCorretor(c.id);
-                  return <div key={c.id}>{linha(c.nome, s, () => s ? setQrPara(s.id) : abrirConexao('corretor', c.id))}</div>;
+                  return <div key={c.id}>{linha(nomeNaLista(c), s,() => s ? setQrPara(s.id) : abrirConexao('corretor', c.id))}</div>;
                 }))}
       </div>
       {modo === 'central' && (
