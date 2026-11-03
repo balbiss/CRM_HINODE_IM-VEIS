@@ -424,3 +424,12 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
   Card mostra o bloco "Valores aprovados" (`LeadDetalhesOka`). Só a rota de mover tem a trava.
 - **Editor de follow-up**: título "PASSO N" em cada passo; texto e legenda (antes legenda era campo de 1 linha) em caixa
   que cresce com o conteúdo (`TextoQueCresce` em `pages/Followup.tsx`).
+
+## 2026-11-02 — Horário de cada passo do follow-up (pedido do dono)
+
+- `followup_passos.hora_envio` ("HH:MM" Brasília, 08:00–20:00; migração 0056). Vazio = regra antiga (encaixa nas levas).
+- `vencimentoComHora` / `vencimentoDoPasso` em `lib/followup.ts`: com hora, o passo sai no dia do atraso ("1 dia depois"
+  = dia seguinte) exatamente nessa hora; hoje já passou → amanhã; domingo → segunda. Iniciar/retomar direto num passo com
+  hora usa a próxima ocorrência dela. `escolherLote` deixa passar fora das levas quando o passo tem hora.
+- Editor: select "Horário" em cada passo (`HORAS_ENVIO`), `atrasoTexto` vira ex. "1 dia depois às 10:30". OBS do
+  {criativo} explica que pode ir em qualquer passo.

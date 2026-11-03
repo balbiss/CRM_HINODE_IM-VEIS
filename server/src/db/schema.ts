@@ -629,6 +629,8 @@ export const followupPassos = pgTable('followup_passos', {
   baseAtraso: text('base_atraso').notNull().default('passo_anterior'),
   soHorarioComercial: boolean('so_horario_comercial').notNull().default(false),
   dataHoraFixa: timestamp('data_hora_fixa', { withTimezone: true }),
+  // Hora escolhida pelo corretor ("HH:MM", horário de Brasília). Vazio = sai nas levas (9h30 / 16h).
+  horaEnvio: text('hora_envio'),
   anexoTipo: text('anexo_tipo'),
   anexoMimetype: text('anexo_mimetype'),
 }, table => ({

@@ -23,6 +23,8 @@ const QUANDO: { v: string; label: string; base: 'proxima_leva' | 'passo_anterior
 ];
 const quandoDe = (p: RemotePassoFluxo) => p.baseAtraso === 'proxima_leva' ? 'leva'
   : (QUANDO.find(q => q.base === 'passo_anterior' && q.min === p.atrasoMinutos)?.v ?? '1d');
+/** Horas que o corretor pode escolher pro passo sair (8h às 20h, de meia em meia hora). */
+const HORAS_ENVIO = Array.from({ length: 25 }, (_, k) => String(8 + Math.floor(k / 2)).padStart(2, '0') + ':' + (k % 2 ? '30' : '00'));
 const STATUS_EXEC: Record<string, string> = { ativa: 'rodando', pausada: 'pausado', encerrada: 'encerrado' };
 
 const fieldLabel: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px' };
@@ -155,9 +157,11 @@ export default function Followup() {
       motivoDescarteEsgotar: rasc.motivoDescarteEsgotar,
     });
     await salvarPassos(fluxo.id, rasc.passos.map((p, i) => {
-      if (i === 0) return { ...p, baseAtraso: 'inscricao' as const, atrasoMinutos: 0, atrasoTexto: 'na hora' };
+      const hora = p.horaEnvio || null;
+      if (i === 0) return { ...p, horaEnvio: hora, baseAtraso: 'inscricao' as const, atrasoMinutos: 0, atrasoTexto: hora ? 'às ' + hora : 'na hora' };
       const q = QUANDO.find(x => x.v === quandoDe(p))!;
-      return { ...p, baseAtraso: q.base, atrasoMinutos: q.min, atrasoTexto: q.label.toLowerCase() };
+      const texto = q.v === 'leva' && hora ? 'às ' + hora : q.label.toLowerCase() + (hora ? ' às ' + hora : '');
+      return { ...p, horaEnvio: hora, baseAtraso: q.base, atrasoMinutos: q.min, atrasoTexto: texto };
     }));
     setDirty(false);
   }
@@ -343,12 +347,23 @@ export default function Followup() {
                               {TIPOS.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
                             </select>
                             {i === 0 ? (
-                              <span style={{ fontSize: 12, color: 'var(--muted)' }}>sai <strong>na hora</strong> que o lead chega pro corretor</span>
+                              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.horaEnvio
+                                ? <>sai <strong>às {p.horaEnvio}</strong> (hoje, ou amanhã se já passou)</>
+                                : <>sai <strong>na hora</strong> que o lead chega pro corretor</>}</span>
                             ) : (
                               <select value={quandoDe(p)} onChange={e => { const q = QUANDO.find(x => x.v === e.target.value)!; patchPasso(i, { baseAtraso: q.base, atrasoMinutos: q.min }); }} style={{ ...inp, width: 170, padding: '6px 8px' }}>
                                 {QUANDO.map(q => <option key={q.v} value={q.v}>{q.label}</option>)}
                               </select>
                             )}
+                            <select
+                              value={p.horaEnvio || ''}
+                              onChange={e => patchPasso(i, { horaEnvio: e.target.value || null })}
+                              title="Que horas essa mensagem sai"
+                              style={{ ...inp, width: 190, padding: '6px 8px', ...(p.horaEnvio ? { borderColor: 'var(--terra)', color: 'var(--terra)', fontWeight: 600 } : {}) }}
+                            >
+                              <option value="">{i === 0 ? 'Horário: na hora' : 'Horário: nas levas'}</option>
+                              {HORAS_ENVIO.map(h => <option key={h} value={h}>Às {h}</option>)}
+                            </select>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--muted)' }}>
                               <input type="checkbox" checked={!!p.soHorarioComercial} onChange={e => patchPasso(i, { soHorarioComercial: e.target.checked })} /> só seg–sáb 8h–20h
                             </label>
@@ -420,7 +435,8 @@ function AvisoCriativo() {
         <ol style={{ margin: '10px 0 2px', paddingLeft: 18 }}>
           <li style={li}>Em <strong>Campanhas</strong>, cole o link da <strong>pasta do Google Drive</strong> com as imagens dos anúncios (compartilhada como "Qualquer pessoa com o link").</li>
           <li style={li}>No Drive, cada imagem precisa ter o <strong>mesmo nome do anúncio na Meta</strong> (ex.: anúncio "[CN 38] [SETE SÓIS]" → arquivo "[CN 38] [SETE SÓIS].jpg"). É assim que o CRM sabe qual imagem é de qual lead.</li>
-          <li style={li}>Aqui no passo de <strong>Texto</strong>, escreva a mensagem e clique em <strong>"Inserir criativo da campanha"</strong> (ou digite <code>{'{criativo}'}</code>).<br />Ex.: <em>"Oi {'{nome}'}, lembra desse anúncio? Ainda tem unidades 👇"</em> + <code>{'{criativo}'}</code></li>
+          <li style={li}>Escolha <strong>em qual passo</strong> a imagem vai — pode ser o 1º, o 2º, o 3º… (não precisa ser a primeira mensagem). Em <strong>"Horário"</strong> do passo, escolha a hora que ele sai.</li>
+          <li style={li}>No passo de <strong>Texto</strong> escolhido, escreva a mensagem e clique em <strong>"Inserir criativo da campanha"</strong> (ou digite <code>{'{criativo}'}</code>).<br />Ex.: <em>"Oi {'{nome}'}, lembra desse anúncio? Ainda tem unidades 👇"</em> + <code>{'{criativo}'}</code></li>
           <li style={li}>Quando o passo sair, o CRM manda a <strong>imagem do anúncio de onde aquele lead veio</strong> com o texto como legenda. Cada lead recebe a imagem da campanha dele.</li>
           <li style={li}>Se o lead <strong>não tiver criativo</strong> (veio direto do WhatsApp, ou o nome no Drive não bate), vai <strong>só o texto</strong> — a régua não trava. Se o passo tiver só o <code>{'{criativo}'}</code> sem texto, ele é pulado.</li>
           <li style={{ ...li, marginBottom: 0 }}>Se o criativo do anúncio for <strong>vídeo</strong>, vai a <strong>capa</strong> dele (imagem). Dica: confira no card do lead se o criativo aparece — se aparece lá, o follow-up também manda.</li>

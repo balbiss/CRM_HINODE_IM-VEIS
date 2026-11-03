@@ -131,6 +131,8 @@ export interface RemotePassoFluxo {
   tipo: PassoTipo; conteudo: string; atrasoMinutos: number; atrasoTexto: string;
   cadenciaLabel: string | null; anexoUrl: string | null; anexoNome: string | null;
   baseAtraso?: BaseAtraso; soHorarioComercial?: boolean;
+  /** Hora escolhida ("HH:MM", Brasília). Vazio = sai nas levas. */
+  horaEnvio?: string | null;
 }
 export interface RemoteFluxo {
   id: string; corretorId: string | null; nome: string; ativo: boolean; disparaEmLeadNovo: boolean;

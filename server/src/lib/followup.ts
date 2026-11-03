@@ -79,6 +79,23 @@ export function calcProximoEnvio(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' |
   return new Date(+agora + p.atrasoMinutos * 60000);
 }
 
+/** Passo com HORA escolhida pelo corretor: sai no dia certo (hoje/"1 dia depois"...) exatamente nessa
+ *  hora de Brasília, fora das levas. Se a hora de hoje já passou, vai amanhã; domingo pula pra segunda.
+ *  `soProxima` = ignora os dias de atraso (retomar/começar a régua já nesse passo). */
+export function vencimentoComHora(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' | 'horaEnvio'>, agora = new Date(), soProxima = false): Date {
+  const [h, m] = String(p.horaEnvio).split(':').map(Number);
+  const dias = !soProxima && p.baseAtraso === 'passo_anterior' ? Math.round(p.atrasoMinutos / 1440) : 0;
+  const s = sp(agora);
+  let d = emSp(s, dias, h, m);
+  if (+d <= +agora) d = emSp(s, dias + 1, h, m);
+  if (sp(d).dow === 0) d = new Date(+d + 86400000);
+  return d;
+}
+/** Quando o passo sai: com hora escolhida → aquela hora; senão a regra de sempre (encaixa na leva). */
+export function vencimentoDoPasso(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' | 'dataHoraFixa' | 'horaEnvio'>, inscritoEm: Date, agora = new Date()): Date {
+  return p.horaEnvio ? vencimentoComHora(p, agora) : janelaEnvio(calcProximoEnvio(p, inscritoEm, agora));
+}
+
 // ---------- variáveis do texto ({nome}, {corretor}, {origem}, {bairro}, {imovel_*}) ----------
 export function primeiroNome(nome: string | null | undefined) {
   return String(nome || '').trim().split(/\s+/)[0] || '';
@@ -195,7 +212,8 @@ export async function iniciarFollowup(io: SocketServer, opts: IniciarOpts): Prom
     imobiliariaId: lead.imobiliariaId, leadId: lead.id, fluxoId: fluxo.id, corretorId,
     passoAtual: inicio, status: 'ativa', iniciadoEm: agora, iniciadoPor: opts.automatico ? 'automatico' : 'manual',
     // do 1º passo: segue a regra dele; de um passo do meio: sai na leva atual (ou na próxima, fora do horário)
-    proximoEnvioEm: inicio === 0 ? calcProximoEnvio(passos[0], agora, agora) : janelaEnvio(agora),
+    proximoEnvioEm: passos[inicio].horaEnvio ? vencimentoComHora(passos[inicio], agora, true)
+      : inicio === 0 ? calcProximoEnvio(passos[0], agora, agora) : janelaEnvio(agora),
   }).returning();
   registrarEvento(lead.imobiliariaId, lead.id, 'followup', 'Follow-up "' + fluxo.nome + '" iniciado'
     + (opts.automatico ? ' automaticamente' : '') + (inicio > 0 ? ' a partir do passo ' + (inicio + 1) : '')
@@ -297,14 +315,15 @@ export async function mudarExecucao(io: SocketServer, ex: Exec, acao: 'pausada' 
     if (ex.status !== 'pausada') return;
     if (await execucaoAtiva(ex.leadId)) return;
     // retomar no passo onde parou ou num passo escolhido pelo corretor
-    const total = (await db.select({ id: followupPassos.id }).from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId))).length;
+    const lista = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId)).orderBy(asc(followupPassos.ordem));
+    const total = lista.length;
     const alvo = passo != null && Number.isInteger(passo) && passo >= 0 && passo < total ? passo : ex.passoAtual;
     if (alvo >= total) return;
     // 1ª mensagem ainda não saiu → agora; senão na leva atual/próxima
     await db.update(followupExecucoes).set({
       status: 'ativa', resultado: null, motivoFim: null, finalizadoEm: null, tentativasErro: 0, passoAtual: alvo,
       enviandoPasso: null, enviandoDesde: null, reservadoEm: null,
-      proximoEnvioEm: alvo === 0 ? new Date() : janelaEnvio(new Date()),
+      proximoEnvioEm: lista[alvo]?.horaEnvio ? vencimentoComHora(lista[alvo], new Date(), true) : alvo === 0 ? new Date() : janelaEnvio(new Date()),
     }).where(eq(followupExecucoes.id, ex.id));
     registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" retomado'
       + (alvo !== ex.passoAtual ? ' a partir do passo ' + (alvo + 1) : ' no passo ' + (alvo + 1)) + '.', ator);
@@ -400,7 +419,8 @@ async function escolherLote(limite: number): Promise<Exec[]> {
     const [passo] = await db.select().from(followupPassos).where(and(eq(followupPassos.fluxoId, ex.fluxoId), eq(followupPassos.ordem, ex.passoAtual))).limit(1);
     if (!passo) continue;
     if (passo.soHorarioComercial && !emHorarioComercial(agora)) continue;
-    if (ex.passoAtual > 0 && !janelaAberta(agora)) continue;
+    // hora escolhida pelo corretor: sai na hora marcada, fora das levas
+    if (ex.passoAtual > 0 && !passo.horaEnvio && !janelaAberta(agora)) continue;
     if (!conectado.has(ex.corretorId)) conectado.set(ex.corretorId, await corretorConectado(ex.imobiliariaId, ex.corretorId));
     if (!conectado.get(ex.corretorId)) continue;
     const atual = porCorretor.get(ex.corretorId);
@@ -525,7 +545,7 @@ async function registrarEnvio(io: SocketServer, ex: Exec, texto: string, waMessa
   const [fluxo] = await db.select().from(followupFluxos).where(eq(followupFluxos.id, ex.fluxoId)).limit(1);
   if (prox) {
     await db.update(followupExecucoes).set({
-      passoAtual: ex.passoAtual + 1, proximoEnvioEm: janelaEnvio(calcProximoEnvio(prox, ex.iniciadoEm, agora)),
+      passoAtual: ex.passoAtual + 1, proximoEnvioEm: vencimentoDoPasso(prox, ex.iniciadoEm, agora),
       tentativasErro: 0, enviandoPasso: null, enviandoDesde: null, reservadoEm: null,
     }).where(eq(followupExecucoes.id, ex.id));
     registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + (fluxo?.nome ?? '') + '" enviou o passo ' + (ex.passoAtual + 1) + ' de ' + passos.length + '.', null);

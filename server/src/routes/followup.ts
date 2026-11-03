@@ -21,6 +21,8 @@ const passoSchema = z.object({
   soHorarioComercial: z.boolean().default(false),
   dataHoraFixa: z.string().datetime({ offset: true }).nullable().optional(),
   cadenciaLabel: z.string().nullable().optional(),
+  // hora escolhida pelo corretor, 08:00–20:00 (horário de Brasília); null = nas levas
+  horaEnvio: z.string().regex(/^([01]\d|20):[0-5]\d$/, 'Horário inválido').refine(h => h >= '08:00' && h <= '20:00', 'Escolha um horário entre 08:00 e 20:00').nullable().optional(),
 });
 
 const fluxoPatchSchema = z.object({
@@ -145,6 +147,7 @@ export function followupRouter(io: SocketServer) {
         baseAtraso: i === 0 ? 'inscricao' : p.baseAtraso, atrasoMinutos: i === 0 ? 0 : p.atrasoMinutos,
         atrasoTexto: i === 0 ? 'na hora' : p.atrasoTexto, soHorarioComercial: p.soHorarioComercial,
         dataHoraFixa: p.dataHoraFixa ? new Date(p.dataHoraFixa) : null, cadenciaLabel: p.cadenciaLabel ?? null,
+        horaEnvio: p.horaEnvio ?? null,
       })));
     }
     io.to('imobiliaria:' + req.auth!.imobiliariaId).emit('followup:mudou', {});

@@ -1,0 +1,1 @@
+ALTER TABLE "followup_passos" ADD COLUMN "hora_envio" text;

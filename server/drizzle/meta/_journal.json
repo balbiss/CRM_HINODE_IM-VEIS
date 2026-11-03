@@ -393,6 +393,13 @@
       "when": 1793665741472,
       "tag": "0055_handy_master_mold",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793666883924,
+      "tag": "0056_spicy_fantastic_four",
+      "breakpoints": true
     }
   ]
 }
