@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MessageSquare, Mic, Image as ImageIcon, FileText, Trash2, ArrowUp, ArrowDown, Plus, Upload, Video, Archive, Copy, RotateCcw } from 'lucide-react';
 import { useAppStore, type RemoteFluxo, type RemotePassoFluxo, type PassoTipo } from '../store/appStore';
 import { MOTIVOS_DESCARTE_NORMAL } from '../lib/data';
@@ -336,6 +336,7 @@ export default function Followup() {
                       const Icon = TIPOS.find(t => t.v === p.tipo)?.Icon ?? MessageSquare;
                       return (
                         <div key={i} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12, background: 'var(--bg)' }}>
+                          <p style={{ margin: '0 0 8px', fontSize: 11.5, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--terra)' }}>Passo {i + 1}</p>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
                             <Icon size={14} color="var(--terra)" />
                             <select value={p.tipo} onChange={e => patchPasso(i, { tipo: e.target.value as PassoTipo })} style={{ ...inp, width: 110, padding: '6px 8px' }}>
@@ -358,7 +359,7 @@ export default function Followup() {
                           </div>
                           {p.tipo === 'texto' ? (
                             <>
-                              <textarea value={p.conteudo} onChange={e => patchPasso(i, { conteudo: e.target.value })} rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Mensagem…" />
+                              <TextoQueCresce value={p.conteudo} onChange={v => patchPasso(i, { conteudo: v })} style={inp} placeholder="Mensagem…" />
                               {/\{criativo\}/i.test(p.conteudo) ? (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 11.5, color: 'var(--olive)', fontWeight: 600 }}>
                                   <ImageIcon size={12} /> Vai junto a imagem do anúncio de onde o lead veio
@@ -373,7 +374,7 @@ export default function Followup() {
                           ) : (
                             <>
                               <PassoAnexo passo={p} onChange={patch => patchPasso(i, patch)} />
-                              <input value={p.conteudo} onChange={e => patchPasso(i, { conteudo: e.target.value })} placeholder="Legenda (opcional)" style={{ ...inp, fontSize: 12 }} />
+                              <TextoQueCresce value={p.conteudo} onChange={v => patchPasso(i, { conteudo: v })} style={inp} placeholder="Legenda (opcional) — o texto que vai junto com o arquivo" />
                             </>
                           )}
                         </div>
@@ -426,5 +427,22 @@ function AvisoCriativo() {
         </ol>
       )}
     </div>
+  );
+}
+
+/** Caixa de texto que cresce com a mensagem: mostra o texto inteiro, sem precisar rolar. */
+function TextoQueCresce({ value, onChange, style, placeholder }: { value: string; onChange: (v: string) => void; style: React.CSSProperties; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight + 2, 110) + 'px';
+  }, [value]);
+  return (
+    <textarea
+      ref={ref} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={4}
+      style={{ ...style, resize: 'vertical', fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.55, overflow: 'hidden', minHeight: 110 }}
+    />
   );
 }

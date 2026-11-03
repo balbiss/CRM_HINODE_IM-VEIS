@@ -218,7 +218,7 @@ interface AppState {
 
   // --- regras da v1 (CRM OKA) no card ---
   /** Mudança de coluna barrada pelo servidor, esperando a data (próximo contato ou compromisso). */
-  moverPendente: { leadId: string; colunaId: string; motivo: 'proximo_contato' | 'agendamento'; titulo: string } | null;
+  moverPendente: { leadId: string; colunaId: string; motivo: 'proximo_contato' | 'agendamento' | 'aprovado'; titulo: string } | null;
   vendaLeadId: string | null;
   descarteLeadId: string | null;
   aprovacoes: Aprovacao[];
@@ -350,8 +350,8 @@ interface AppState {
   setFollowupAutomatico: (v: boolean) => Promise<void>;
   salvarPassos: (fluxoId: string, passos: RemotePassoFluxo[]) => Promise<void>;
   excluirFluxo: (id: string) => Promise<void>;
-  iniciarFollowupLead: (leadId: string, fluxoId: string) => Promise<boolean>;
-  mudarExecucao: (id: string, status: 'ativa' | 'pausada' | 'encerrada') => Promise<void>;
+  iniciarFollowupLead: (leadId: string, fluxoId: string, passoInicial?: number) => Promise<boolean>;
+  mudarExecucao: (id: string, status: 'ativa' | 'pausada' | 'encerrada', passo?: number) => Promise<void>;
   setCadenciaLead: (leadId: string, valor: string) => Promise<void>;
   setColByTitle: (leadId: string, title: string) => void;
   openDiscard: () => void;
@@ -375,7 +375,7 @@ interface AppState {
   setVendaLeadId: (id: string | null) => void;
   setDescarteLeadId: (id: string | null) => void;
   /** Mover com a data que a regra pediu (próximo contato / compromisso). */
-  moverComData: (leadId: string, colunaId: string, extra: { proximoContatoEm?: string; dataVisita?: string; tipoVisita?: 'VISITA' | 'FID' }) => Promise<boolean>;
+  moverComData: (leadId: string, colunaId: string, extra: { proximoContatoEm?: string; dataVisita?: string; tipoVisita?: 'VISITA' | 'FID'; valorFinanciamento?: number; valorSubsidio?: number; valorFgts?: number }) => Promise<boolean>;
   patchLead: (leadId: string, patch: Record<string, unknown>) => Promise<boolean>;
   registrarCadencia: (leadId: string, cadencia: number) => Promise<void>;
   descartarLead: (leadId: string, motivo: string, observacao: string) => Promise<boolean>;
@@ -917,7 +917,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .catch((e: ApiError) => {
         set(s => ({ leads: s.leads.map(x => (x.id === id ? { ...x, ...antes } : x)) }));
         // regras da v1: a coluna pede uma data, ou VENDA só pelo registro de venda
-        if (e.motivo === 'proximo_contato' || e.motivo === 'agendamento') {
+        if (e.motivo === 'proximo_contato' || e.motivo === 'agendamento' || e.motivo === 'aprovado') {
           set({ moverPendente: { leadId: id, colunaId, motivo: e.motivo, titulo: destino.titulo } });
           return;
         }
@@ -1725,25 +1725,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().toast('Não foi possível excluir');
     }
   },
-  iniciarFollowupLead: async (leadId, fluxoId) => {
+  iniciarFollowupLead: async (leadId, fluxoId, passoInicial) => {
     const token = get().token;
     if (!token) return false;
     try {
-      await apiFetch('/api/followup/execucoes', token, { method: 'POST', body: JSON.stringify({ leadId, fluxoId }) });
+      await apiFetch('/api/followup/execucoes', token, { method: 'POST', body: JSON.stringify({ leadId, fluxoId, ...(passoInicial ? { passoInicial } : {}) }) });
       get().fetchFollowup();
-      get().toast('Follow-up iniciado');
+      get().toast(passoInicial ? 'Follow-up iniciado a partir do passo ' + (passoInicial + 1) : 'Follow-up iniciado');
       return true;
     } catch (e) {
       get().toast((e as ApiError).message || 'Não foi possível iniciar');
       return false;
     }
   },
-  mudarExecucao: async (id, status) => {
+  mudarExecucao: async (id, status, passo) => {
     const token = get().token;
     if (!token) return;
-    set(s => ({ execucoesFollowup: s.execucoesFollowup.map(e => (e.id === id ? { ...e, status } : e)) }));
+    set(s => ({ execucoesFollowup: s.execucoesFollowup.map(e => (e.id === id ? { ...e, status, ...(passo != null ? { passoAtual: passo } : {}) } : e)) }));
     try {
-      await apiFetch('/api/followup/execucoes/' + id, token, { method: 'PATCH', body: JSON.stringify({ status }) });
+      await apiFetch('/api/followup/execucoes/' + id, token, { method: 'PATCH', body: JSON.stringify(passo != null ? { status, passo } : { status }) });
       get().fetchFollowup();
     } catch (e) {
       get().toast((e as ApiError).message || 'Não foi possível mudar o follow-up');

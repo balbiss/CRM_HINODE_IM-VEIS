@@ -108,6 +108,11 @@ export interface Lead {
   linkDrive?: string | null;
   saldoFgts?: number | null;
   valorEntrada?: number | null;
+  /** Valores aprovados no crédito (pedidos ao mover pra APROVADO). */
+  aprovadoFinanciamento?: number | null;
+  aprovadoSubsidio?: number | null;
+  aprovadoFgts?: number | null;
+  aprovadoEm?: string | null;
   dataNascimento?: string | null;
   cadenciaChamada?: number;
   dataUltimaChamada?: string | null;

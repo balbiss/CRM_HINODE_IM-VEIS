@@ -44,15 +44,34 @@ function MoverColunaModal() {
   const [hora, setHora] = useState('');
   const [tipo, setTipo] = useState<'VISITA' | 'FID'>('VISITA');
   const [salvando, setSalvando] = useState(false);
-  useEffect(() => { setData(''); setHora(''); setTipo(p?.titulo.toUpperCase().includes('FID') ? 'FID' : 'VISITA'); }, [p]);
+  const [fin, setFin] = useState('');
+  const [sub, setSub] = useState('');
+  const [fgts, setFgts] = useState('');
+  useEffect(() => {
+    setData(''); setHora(''); setTipo(p?.titulo.toUpperCase().includes('FID') ? 'FID' : 'VISITA');
+    // APROVADO: já vem com o que estiver no card (caso o card volte pra APROVADO de novo)
+    setFin(lead?.aprovadoFinanciamento ? String(lead.aprovadoFinanciamento).replace('.', ',') : '');
+    setSub(lead?.aprovadoSubsidio ? String(lead.aprovadoSubsidio).replace('.', ',') : '');
+    setFgts(lead?.aprovadoFgts ? String(lead.aprovadoFgts).replace('.', ',') : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p]);
   if (!p) return null;
   const agendamento = p.motivo === 'agendamento';
-  const valido = !!data && !!hora && new Date(isoLocal(data, hora)).getTime() > Date.now();
+  const aprovado = p.motivo === 'aprovado';
+  // APROVADO não pede data de novo se o card já tem um próximo contato no futuro
+  const temProximo = !!lead?.proximoContatoEm && +new Date(lead.proximoContatoEm) > Date.now();
+  const dataOk = !!data && !!hora && new Date(isoLocal(data, hora)).getTime() > Date.now();
+  const finNum = numeroBR(fin);
+  const valido = aprovado ? finNum > 0 && (dataOk || (temProximo && !data)) : dataOk;
   async function confirmar() {
     if (!p || !valido) return;
     setSalvando(true);
-    const iso = isoLocal(data, hora);
-    await moverComData(p.leadId, p.colunaId, agendamento ? { dataVisita: iso, tipoVisita: tipo } : { proximoContatoEm: iso });
+    const iso = data && hora ? isoLocal(data, hora) : undefined;
+    await moverComData(p.leadId, p.colunaId, agendamento
+      ? { dataVisita: iso, tipoVisita: tipo }
+      : aprovado
+        ? { proximoContatoEm: iso, valorFinanciamento: finNum, valorSubsidio: numeroBR(sub) || undefined, valorFgts: numeroBR(fgts) || undefined }
+        : { proximoContatoEm: iso });
     setSalvando(false);
   }
   return (
@@ -62,8 +81,23 @@ function MoverColunaModal() {
         <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0', lineHeight: 1.5 }}>
           {agendamento
             ? 'Essa coluna exige a data e o horário do compromisso.'
-            : 'Marque quando vai ser o próximo contato com ' + (lead?.nome.split(' ')[0] ?? 'o cliente') + '.'}
+            : aprovado
+              ? 'Informe os valores aprovados de ' + (lead?.nome.split(' ')[0] ?? 'o cliente') + '. O financiamento é obrigatório; subsídio e FGTS só se o cliente tiver.'
+              : 'Marque quando vai ser o próximo contato com ' + (lead?.nome.split(' ')[0] ?? 'o cliente') + '.'}
         </p>
+        {aprovado && (
+          <>
+            <label style={label}>Financiamento (R$) *</label>
+            <input inputMode="decimal" autoFocus value={fin} onChange={e => setFin(e.target.value)} placeholder="180.000,00" style={{ ...input, borderColor: fin && !(finNum > 0) ? 'var(--terra)' : 'var(--line)' }} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}><label style={label}>Subsídio (R$)</label><input inputMode="decimal" value={sub} onChange={e => setSub(e.target.value)} placeholder="opcional" style={input} /></div>
+              <div style={{ flex: 1 }}><label style={label}>FGTS (R$)</label><input inputMode="decimal" value={fgts} onChange={e => setFgts(e.target.value)} placeholder="opcional" style={input} /></div>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '14px 0 0' }}>
+              {temProximo ? 'Próximo contato já marcado (' + new Date(lead!.proximoContatoEm!).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '). Se quiser, troque abaixo.' : 'Marque também o próximo contato:'}
+            </p>
+          </>
+        )}
         {agendamento && (
           <>
             <label style={label}>Tipo</label>
@@ -82,7 +116,7 @@ function MoverColunaModal() {
           <option value="">Escolha…</option>
           {HORARIOS.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
-        {data && hora && !valido && <p style={{ fontSize: 12, color: 'var(--terra)', margin: '8px 0 0' }}>Escolha um horário no futuro.</p>}
+        {data && hora && !dataOk && <p style={{ fontSize: 12, color: 'var(--terra)', margin: '8px 0 0' }}>Escolha um horário no futuro.</p>}
         <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
           <button onClick={confirmar} disabled={!valido || salvando} style={{ ...btnPrim, flex: 1, opacity: valido && !salvando ? 1 : 0.5 }}>{salvando ? 'Salvando…' : 'Mover'}</button>
           <button onClick={() => setP(null)} style={btnSec}>Cancelar</button>
@@ -197,4 +231,16 @@ function DescarteModal() {
       </div>
     </div>
   );
+}
+
+/** "180.000,50" / "180000" / "180000.50" → número (0 se vazio ou inválido). */
+function numeroBR(v: string): number {
+  const t = v.trim();
+  if (!t) return 0;
+  const limpo = t.replace(/[^\d.,]/g, '');
+  // vírgula = decimal brasileiro; sem vírgula, "180.000" é ponto de milhar
+  const n = Number(/,/.test(limpo) || /^\d{1,3}(\.\d{3})+$/.test(limpo)
+    ? limpo.replace(/\./g, '').replace(',', '.')
+    : limpo);
+  return Number.isFinite(n) ? n : 0;
 }

@@ -16,6 +16,7 @@ import { EmojiPicker } from './EmojiPicker';
 import { AvisoJanelaOficial } from './WhatsappOficial';
 import { LeadDetalhesOka } from './LeadDetalhesOka';
 import { CriativoDoLead } from './CriativoDoLead';
+import { FollowupControles } from './FollowupDoLead';
 import { MensagensProntas } from './MensagensProntas';
 
 const TABS: Array<[string, string]> = [
@@ -47,9 +48,6 @@ export function LeadModal() {
   const { isManager } = useRoleInfo();
   const fluxos = useAppStore(s => s.fluxos);
   const execucoesFollowup = useAppStore(s => s.execucoesFollowup);
-  const iniciarFollowupLead = useAppStore(s => s.iniciarFollowupLead);
-  const mudarExecucao = useAppStore(s => s.mudarExecucao);
-  const [fluxoEscolhido, setFluxoEscolhido] = useState('');
   const eventosLead = useAppStore(s => s.eventosLead);
   const fetchEventosLead = useAppStore(s => s.fetchEventosLead);
   const addNotaLead = useAppStore(s => s.addNotaLead);
@@ -76,7 +74,6 @@ export function LeadModal() {
 
   const colAtual = colunas.find(c => c.id === L.colunaId)?.titulo ?? '—';
   const execucao = execucoesFollowup.find(e => e.leadId === leadId) ?? null;
-  const fluxosDisponiveis = fluxos.filter(f => f.passos.length > 0);
 
   const eventos = (leadId && eventosLead[leadId]) || [];
   const tarefasDoLead = tarefas.filter(t => t.leadId === leadId).sort((a, b) => +new Date(a.venceEm) - +new Date(b.venceEm));
@@ -286,43 +283,7 @@ export function LeadModal() {
 
           {leadTab === 'followup' && (
             <>
-              {execucao ? (
-                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 18, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                  <span style={{ width: 9, height: 9, borderRadius: '50%', flex: 'none', background: execucao.status === 'ativa' ? 'var(--olive)' : 'var(--terra)' }} />
-                  <span style={{ flex: 1, minWidth: 190 }}>
-                    <span style={{ display: 'block', fontSize: 14, fontWeight: 700 }}>
-                      {execucao.status === 'ativa' ? 'Follow-up rodando' : 'Follow-up pausado'} — {execucao.fluxoNome}
-                    </span>
-                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
-                      passo {Math.min(execucao.passoAtual + 1, execucao.totalPassos)} de {execucao.totalPassos}
-                      {execucao.status === 'ativa' && execucao.proximoEnvioEm
-                        ? ' · próximo envio ' + new Date(execucao.proximoEnvioEm).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-                        : execucao.motivoFim ? ' · ' + execucao.motivoFim : ''}
-                    </span>
-                  </span>
-                  {execucao.status === 'ativa'
-                    ? <button onClick={() => mudarExecucao(execucao.id, 'pausada')} style={{ padding: '8px 14px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, fontWeight: 600 }}>Pausar</button>
-                    : <button onClick={() => mudarExecucao(execucao.id, 'ativa')} style={{ padding: '8px 14px', border: '1px solid var(--olive)', borderRadius: 7, background: 'none', color: 'var(--olive)', fontSize: 12.5, fontWeight: 600 }}>Retomar</button>}
-                  <button onClick={() => ask('Encerrar follow-up?', L.nome + ' sai da régua e não recebe mais mensagens programadas.', 'Encerrar', () => mudarExecucao(execucao.id, 'encerrada'))} style={{ padding: '8px 14px', border: '1px solid var(--line)', borderRadius: 7, background: 'none', fontSize: 12.5, color: 'var(--terra)' }}>Encerrar</button>
-                </div>
-              ) : (
-                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 18, marginBottom: 16 }}>
-                  <p style={{ fontSize: 13.5, fontWeight: 700, margin: '0 0 4px' }}>Nenhuma régua rodando pra este lead</p>
-                  <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px' }}>Escolha um fluxo pra começar o follow-up automático.</p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <select value={fluxoEscolhido} onChange={e => setFluxoEscolhido(e.target.value)} style={{ flex: 1, minWidth: 180, padding: '9px 11px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }}>
-                      <option value="">Escolha o fluxo…</option>
-                      {fluxosDisponiveis.map(f => <option key={f.id} value={f.id}>{f.nome} ({f.passos.length} passos)</option>)}
-                    </select>
-                    <button
-                      onClick={async () => { if (fluxoEscolhido && await iniciarFollowupLead(L.id, fluxoEscolhido)) setFluxoEscolhido(''); }}
-                      disabled={!fluxoEscolhido}
-                      style={{ padding: '9px 16px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: fluxoEscolhido ? 1 : 0.5 }}
-                    >Iniciar</button>
-                  </div>
-                  {fluxosDisponiveis.length === 0 && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '10px 0 0' }}>Monte um fluxo com passos na página Follow-up primeiro.</p>}
-                </div>
-              )}
+              <FollowupControles leadId={L.id} leadNome={L.nome} />
               {execucao && (() => {
                 const fx = fluxos.find(f => f.id === execucao.fluxoId);
                 if (!fx) return null;

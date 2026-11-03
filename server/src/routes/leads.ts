@@ -100,13 +100,17 @@ export function leadsRouter(io: SocketServer) {
     proximoContatoEm: z.string().datetime({ offset: true }).optional(),
     dataVisita: z.string().datetime({ offset: true }).optional(),
     tipoVisita: z.enum(['VISITA', 'FID']).optional(),
+    // APROVADO: valores aprovados (financiamento obrigatório; subsídio e FGTS nem todo cliente tem)
+    valorFinanciamento: z.number().positive().optional(),
+    valorSubsidio: z.number().min(0).optional(),
+    valorFgts: z.number().min(0).optional(),
   });
 
   router.patch('/:id/mover', async (req, res) => {
     const parsed = moveSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'colunaId inválido' });
     const { imobiliariaId, role, sub, nome } = req.auth!;
-    const { colunaId, proximoContatoEm, dataVisita, tipoVisita } = parsed.data;
+    const { colunaId, proximoContatoEm, dataVisita, tipoVisita, valorFinanciamento, valorSubsidio, valorFgts } = parsed.data;
 
     const scoped = role === 'corretor'
       ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
@@ -126,6 +130,22 @@ export function leadsRouter(io: SocketServer) {
     }
     const agora = Date.now();
     const extra: Partial<typeof leads.$inferInsert> = {};
+    let textoAprovado = '';
+    if (col.slug === 'aprovado') {
+      if (!valorFinanciamento) {
+        return res.status(409).json({ error: 'Pra levar o card pra APROVADO, informe o valor do financiamento aprovado.', motivo: 'aprovado' });
+      }
+      Object.assign(extra, {
+        aprovadoFinanciamento: String(valorFinanciamento),
+        aprovadoSubsidio: valorSubsidio ? String(valorSubsidio) : null,
+        aprovadoFgts: valorFgts ? String(valorFgts) : null,
+        aprovadoEm: new Date(),
+      });
+      const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      textoAprovado = ' — Financiamento ' + brl(valorFinanciamento)
+        + (valorSubsidio ? ' · Subsídio ' + brl(valorSubsidio) : '')
+        + (valorFgts ? ' · FGTS ' + brl(valorFgts) : '');
+    }
     if (col.slug && SLUGS_EXIGEM_AGENDAMENTO.includes(col.slug)) {
       const visita = dataVisita ? new Date(dataVisita) : antes.dataVisita;
       if (!visita || +visita <= agora) {
@@ -148,7 +168,7 @@ export function leadsRouter(io: SocketServer) {
       .where(scoped)
       .returning();
     if (!row) return res.status(404).json({ error: 'Lead não encontrado' });
-    registrarEvento(imobiliariaId, row.id, 'coluna', 'Movido para "' + col.titulo + '"'
+    registrarEvento(imobiliariaId, row.id, 'coluna', 'Movido para "' + col.titulo + '"' + textoAprovado
       + (extra.proximoContatoEm ? ' e agendou o próximo contato' : extra.dataVisita ? ' e marcou ' + (extra.tipoVisita ?? 'o compromisso') : ''), nome);
     // tirou do robô (coluna FOLLOW-UP AUTOMÁTICO) ou saiu do funil → para o follow-up
     const [colAntes] = antes.colunaId

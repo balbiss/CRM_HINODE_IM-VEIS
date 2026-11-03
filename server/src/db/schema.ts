@@ -241,6 +241,11 @@ export const leads = pgTable('leads', {
   linkDrive: text('link_drive'),
   saldoFgts: numeric('saldo_fgts', { precision: 14, scale: 2 }),
   valorEntrada: numeric('valor_entrada', { precision: 14, scale: 2 }),
+  // Valores aprovados no crédito — pedidos quando o card vai pra APROVADO (financiamento obrigatório).
+  aprovadoFinanciamento: numeric('aprovado_financiamento', { precision: 14, scale: 2 }),
+  aprovadoSubsidio: numeric('aprovado_subsidio', { precision: 14, scale: 2 }),
+  aprovadoFgts: numeric('aprovado_fgts', { precision: 14, scale: 2 }),
+  aprovadoEm: timestamp('aprovado_em', { withTimezone: true }),
   dataNascimento: date('data_nascimento', { mode: 'string' }),
   // ano em que o lembrete de aniversário já foi mandado (não repete no mesmo ano)
   lembreteAniversarioAno: integer('lembrete_aniversario_ano'),

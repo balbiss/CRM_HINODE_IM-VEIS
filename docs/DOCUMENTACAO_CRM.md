@@ -409,3 +409,18 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
   oficial `context.id` → acha a citada pelo `wa_message_id` ou `wa_chave`.
   Front: `components/RespostaMensagem.tsx` (2 cliques no balão / setinha; barra "Respondendo…"; citação clicável) nas
   Conversas e no chat do card; estado `respondendo` no store, `enviarMensagem` anexa sozinho (texto, anexo, áudio, prontas).
+
+## 2026-11-02 — Pedidos do dono: follow-up a partir de um passo, valores do APROVADO, editor maior
+
+- **Follow-up a partir de um passo**: `POST /api/followup/execucoes` aceita `passoInicial` (0 = 1º passo; de um passo do
+  meio sai em `janelaEnvio(agora)`); `PATCH /api/followup/execucoes/:id` com `status: 'ativa'` aceita `passo` (retomar
+  em outro passo). Iniciar fecha qualquer régua **pausada** do lead antes. `GET /api/followup/execucoes/lead/:leadId/ultima`
+  devolve a última régua (mesmo encerrada) — o card sugere continuar do passo seguinte ao último enviado (caso "cliente
+  respondeu → corretor conversou → cliente sumiu de novo"). Front: `components/FollowupDoLead.tsx` (aba Follow-up do card).
+- **APROVADO pede valores**: colunas `leads.aprovado_financiamento/subsidio/fgts/aprovado_em` (migração 0055).
+  `PATCH /api/leads/:id/mover` pra coluna slug `aprovado` sem `valorFinanciamento` → 409 `motivo: 'aprovado'`; o
+  modal (`ModaisRegrasOka`) pede Financiamento (obrigatório), Subsídio, FGTS + próximo contato (dispensa a data se o card
+  já tem um no futuro). Evento no Histórico: "Movido para APROVADO — Financiamento R$ X · Subsídio R$ Y · FGTS R$ Z".
+  Card mostra o bloco "Valores aprovados" (`LeadDetalhesOka`). Só a rota de mover tem a trava.
+- **Editor de follow-up**: título "PASSO N" em cada passo; texto e legenda (antes legenda era campo de 1 linha) em caixa
+  que cresce com o conteúdo (`TextoQueCresce` em `pages/Followup.tsx`).

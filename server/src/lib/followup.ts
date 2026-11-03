@@ -165,6 +165,10 @@ interface IniciarOpts {
   imobiliariaId: string;
   corretorId: string | null;
   automatico: boolean;
+  /** Começar a partir deste passo (0 = o 1º). Usado quando o corretor religa a régua depois do
+   *  cliente ter respondido, pra não mandar de novo o que já foi. */
+  passoInicial?: number;
+  ator?: string;
 }
 
 /** v1 followup_iniciar_interno: precisa de corretor, fluxo ativo com passo e nenhum robô rodando. */
@@ -180,15 +184,22 @@ export async function iniciarFollowup(io: SocketServer, opts: IniciarOpts): Prom
   const passos = await db.select().from(followupPassos).where(eq(followupPassos.fluxoId, fluxo.id)).orderBy(asc(followupPassos.ordem));
   if (!passos.length) return { ok: false, motivo: 'Fluxo não tem nenhum passo.' };
   if (await execucaoAtiva(lead.id)) return { ok: false, motivo: 'Este lead já tem um follow-up rodando.' };
+  const inicio = opts.passoInicial ?? 0;
+  if (!Number.isInteger(inicio) || inicio < 0 || inicio >= passos.length) return { ok: false, motivo: 'Esse fluxo não tem o passo ' + (inicio + 1) + '.' };
+  // o lead já tinha uma régua parada (pausada): fecha ela antes de começar a nova
+  await db.update(followupExecucoes).set({ status: 'encerrada', resultado: 'trocado', motivoFim: 'reiniciado em outro passo', finalizadoEm: new Date(), proximoEnvioEm: null })
+    .where(and(eq(followupExecucoes.leadId, lead.id), eq(followupExecucoes.status, 'pausada')));
 
   const agora = new Date();
   const [ex] = await db.insert(followupExecucoes).values({
     imobiliariaId: lead.imobiliariaId, leadId: lead.id, fluxoId: fluxo.id, corretorId,
-    passoAtual: 0, status: 'ativa', iniciadoEm: agora, iniciadoPor: opts.automatico ? 'automatico' : 'manual',
-    proximoEnvioEm: calcProximoEnvio(passos[0], agora, agora),
+    passoAtual: inicio, status: 'ativa', iniciadoEm: agora, iniciadoPor: opts.automatico ? 'automatico' : 'manual',
+    // do 1º passo: segue a regra dele; de um passo do meio: sai na leva atual (ou na próxima, fora do horário)
+    proximoEnvioEm: inicio === 0 ? calcProximoEnvio(passos[0], agora, agora) : janelaEnvio(agora),
   }).returning();
   registrarEvento(lead.imobiliariaId, lead.id, 'followup', 'Follow-up "' + fluxo.nome + '" iniciado'
-    + (opts.automatico ? ' automaticamente' : '') + ' (' + passos.length + ' passo(s)).', null);
+    + (opts.automatico ? ' automaticamente' : '') + (inicio > 0 ? ' a partir do passo ' + (inicio + 1) : '')
+    + ' (' + passos.length + ' passo(s)).', opts.ator ?? null);
   // card vai pra coluna FOLLOW-UP AUTOMÁTICO enquanto o robô roda
   const colFollow = await colunaPorSlug(lead.imobiliariaId, 'followup_auto');
   if (colFollow && lead.colunaId !== colFollow) {
@@ -270,7 +281,7 @@ export async function encerrarPorLead(io: SocketServer, imobiliariaId: string, l
 }
 
 // ---------- pausar / retomar / encerrar / trocar (tela) ----------
-export async function mudarExecucao(io: SocketServer, ex: Exec, acao: 'pausada' | 'ativa' | 'encerrada', ator: string) {
+export async function mudarExecucao(io: SocketServer, ex: Exec, acao: 'pausada' | 'ativa' | 'encerrada', ator: string, passo?: number) {
   if (acao === 'encerrada') {
     if (ex.status === 'encerrada') return;
     await db.update(followupExecucoes).set({ status: 'encerrada', resultado: 'encerrado_manual', motivoFim: 'encerrado manualmente', finalizadoEm: new Date(), proximoEnvioEm: null })
@@ -285,12 +296,18 @@ export async function mudarExecucao(io: SocketServer, ex: Exec, acao: 'pausada' 
   } else {
     if (ex.status !== 'pausada') return;
     if (await execucaoAtiva(ex.leadId)) return;
-    // retomar: 1ª mensagem ainda não saiu → agora; senão na próxima leva
+    // retomar no passo onde parou ou num passo escolhido pelo corretor
+    const total = (await db.select({ id: followupPassos.id }).from(followupPassos).where(eq(followupPassos.fluxoId, ex.fluxoId))).length;
+    const alvo = passo != null && Number.isInteger(passo) && passo >= 0 && passo < total ? passo : ex.passoAtual;
+    if (alvo >= total) return;
+    // 1ª mensagem ainda não saiu → agora; senão na leva atual/próxima
     await db.update(followupExecucoes).set({
-      status: 'ativa', resultado: null, motivoFim: null, finalizadoEm: null, tentativasErro: 0,
-      proximoEnvioEm: ex.passoAtual === 0 ? new Date() : janelaEnvio(new Date()),
+      status: 'ativa', resultado: null, motivoFim: null, finalizadoEm: null, tentativasErro: 0, passoAtual: alvo,
+      enviandoPasso: null, enviandoDesde: null, reservadoEm: null,
+      proximoEnvioEm: alvo === 0 ? new Date() : janelaEnvio(new Date()),
     }).where(eq(followupExecucoes.id, ex.id));
-    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" retomado.', ator);
+    registrarEvento(ex.imobiliariaId, ex.leadId, 'followup', 'Follow-up "' + await nomeFluxo(ex.fluxoId) + '" retomado'
+      + (alvo !== ex.passoAtual ? ' a partir do passo ' + (alvo + 1) : ' no passo ' + (alvo + 1)) + '.', ator);
   }
   avisarMudou(io, ex.imobiliariaId, ex.leadId);
 }

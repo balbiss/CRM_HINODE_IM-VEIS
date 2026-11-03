@@ -39,6 +39,10 @@ export interface RemoteLead {
   linkDrive?: string | null;
   saldoFgts?: string | null;
   valorEntrada?: string | null;
+  aprovadoFinanciamento?: string | null;
+  aprovadoSubsidio?: string | null;
+  aprovadoFgts?: string | null;
+  aprovadoEm?: string | null;
   dataNascimento?: string | null;
   cadenciaChamada?: number;
   dataUltimaChamada?: string | null;
@@ -115,6 +119,10 @@ export function mapRemoteLead(r: RemoteLead, colunas: RemoteColuna[], perfis: Re
     linkDrive: r.linkDrive ?? null,
     saldoFgts: num(r.saldoFgts),
     valorEntrada: num(r.valorEntrada),
+    aprovadoFinanciamento: num(r.aprovadoFinanciamento),
+    aprovadoSubsidio: num(r.aprovadoSubsidio),
+    aprovadoFgts: num(r.aprovadoFgts),
+    aprovadoEm: r.aprovadoEm ?? null,
     dataNascimento: r.dataNascimento ?? null,
     cadenciaChamada: r.cadenciaChamada ?? 0,
     dataUltimaChamada: r.dataUltimaChamada ?? null,

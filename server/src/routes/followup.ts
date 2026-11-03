@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, eq, desc, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import { followupFluxos, followupPassos, followupExecucoes, leads, perfis, imobiliarias } from '../db/schema.js';
@@ -192,11 +192,23 @@ export function followupRouter(io: SocketServer) {
     })));
   });
 
+  // Última régua desse lead (mesmo encerrada): o card sugere "continuar do passo X" quando o
+  // corretor religa o follow-up depois do cliente ter respondido.
+  router.get('/execucoes/lead/:leadId/ultima', async (req, res) => {
+    const { imobiliariaId } = req.auth!;
+    const [ex] = await db.select().from(followupExecucoes)
+      .where(and(eq(followupExecucoes.leadId, req.params.leadId), eq(followupExecucoes.imobiliariaId, imobiliariaId)))
+      .orderBy(desc(followupExecucoes.iniciadoEm)).limit(1);
+    if (!ex) return res.json(null);
+    // quantos passos saíram de verdade nessa régua (o passoAtual já aponta pro próximo)
+    res.json({ fluxoId: ex.fluxoId, passoAtual: ex.passoAtual, status: ex.status, resultado: ex.resultado, motivoFim: ex.motivoFim, finalizadoEm: ex.finalizadoEm });
+  });
+
   // Inicia manualmente a régua pra um lead ("Iniciar follow-up" na aba do card).
   router.post('/execucoes', async (req, res) => {
-    const parsed = z.object({ leadId: z.string().uuid(), fluxoId: z.string().uuid() }).safeParse(req.body);
+    const parsed = z.object({ leadId: z.string().uuid(), fluxoId: z.string().uuid(), passoInicial: z.number().int().min(0).optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'leadId e fluxoId obrigatórios' });
-    const { imobiliariaId, role, sub } = req.auth!;
+    const { imobiliariaId, role, sub, nome } = req.auth!;
 
     const leadCond = role === 'corretor'
       ? and(eq(leads.id, parsed.data.leadId), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
@@ -204,14 +216,14 @@ export function followupRouter(io: SocketServer) {
     const [lead] = await db.select({ id: leads.id, corretorId: leads.corretorId }).from(leads).where(leadCond).limit(1);
     if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
 
-    const r = await iniciarFollowup(io, { leadId: lead.id, fluxoId: parsed.data.fluxoId, imobiliariaId, corretorId: lead.corretorId, automatico: false });
+    const r = await iniciarFollowup(io, { leadId: lead.id, fluxoId: parsed.data.fluxoId, imobiliariaId, corretorId: lead.corretorId, automatico: false, passoInicial: parsed.data.passoInicial, ator: nome });
     if (!r.ok) return res.status(400).json({ error: r.motivo || 'Não foi possível iniciar' });
     res.status(201).json({ ok: true, id: r.id });
   });
 
   // Pausar / retomar / encerrar. "Trocar fluxo" = encerrar + iniciar outro (POST /execucoes).
   router.patch('/execucoes/:id', async (req, res) => {
-    const parsed = z.object({ status: z.enum(['ativa', 'pausada', 'encerrada']) }).safeParse(req.body);
+    const parsed = z.object({ status: z.enum(['ativa', 'pausada', 'encerrada']), passo: z.number().int().min(0).optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'status inválido' });
     const { imobiliariaId, role, sub, nome } = req.auth!;
     const cond = role === 'corretor'
@@ -219,7 +231,7 @@ export function followupRouter(io: SocketServer) {
       : and(eq(followupExecucoes.id, req.params.id), eq(followupExecucoes.imobiliariaId, imobiliariaId));
     const [ex] = await db.select().from(followupExecucoes).where(cond).limit(1);
     if (!ex) return res.status(404).json({ error: 'Follow-up não encontrado' });
-    await mudarExecucao(io, ex, parsed.data.status, nome);
+    await mudarExecucao(io, ex, parsed.data.status, nome, parsed.data.passo);
     res.json({ ok: true });
   });
 

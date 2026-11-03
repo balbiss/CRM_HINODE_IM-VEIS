@@ -169,6 +169,21 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
           </div>
         </Bloco>
 
+        {/* valores aprovados no crédito (preenchidos ao mover pra APROVADO) */}
+        {L.aprovadoFinanciamento != null && (
+          <Bloco cor="branco">
+            <label style={rotuloCss}>Valores aprovados{L.aprovadoEm ? ' · ' + fmt(L.aprovadoEm) : ''}</label>
+            <div data-modal-grid style={grid3}>
+              {([['Financiamento', L.aprovadoFinanciamento], ['Subsídio', L.aprovadoSubsidio], ['FGTS', L.aprovadoFgts]] as const).map(([r, v]) => (
+                <div key={r} style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--oliveSoft)' }}>
+                  <span style={{ display: 'block', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>{r}</span>
+                  <span style={{ display: 'block', fontSize: 15, fontWeight: 700, marginTop: 3 }}>{v != null ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          </Bloco>
+        )}
+
         {/* 4. FINANCEIRO — branco */}
         <Bloco cor="branco">
           <div data-modal-grid style={grid3}>
