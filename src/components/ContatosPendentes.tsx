@@ -45,7 +45,6 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
   const token = useAppStore(s => s.token);
   const toast = useAppStore(s => s.toast);
   const ask = useAppStore(s => s.ask);
-  const souGestor = useAppStore(s => s.me?.role === 'dono' || s.me?.role === 'gerente');
   const [aberto, setAberto] = useState(true);
   const [verIgnorados, setVerIgnorados] = useState(false);
   const [ignorados, setIgnorados] = useState<ContatoIgnorado[]>([]);
@@ -55,8 +54,9 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
     apiFetch<ContatoIgnorado[]>('/api/contatos-whatsapp/ignorados', token).then(setIgnorados).catch(() => {});
   };
 
-  // No número de dono/gerente o card nasce direto (sem lista de pendentes).
-  if (!espelho || souGestor) return null;
+  // Desde 11-03 todo número conectado já cria o card direto: a lista só aparece se sobrou
+  // algum contato pendente de antes, pra pessoa decidir.
+  if (!espelho || pendentes.length === 0) return null;
 
   const trazer = async (c: ContatoPendente) => {
     setOcupado(c.id);
@@ -122,7 +122,7 @@ export function ContatosPendentes({ espelho, pendentes, recarregar }: ReturnType
       {aberto && (
         <div style={{ padding: '0 12px 10px' }}>
           <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 4px 8px', lineHeight: 1.5 }}>
-            Quem não é lead não entra no CRM sozinho. Só você vê esta lista — o gestor não.
+            Contatos que chegaram antes da mudança (agora quem escreve já vira card sozinho). Decida o que fazer com eles — só você vê esta lista.
           </p>
           {pendentes.length === 0 && (
             <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 4px 6px' }}>Nenhum contato novo.</p>

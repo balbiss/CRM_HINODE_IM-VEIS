@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosPendentes, contatosIgnorados } from '../db/schema.js';
+import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosIgnorados } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { wahaConfigurado, criarSessao, pararSessao, statusSessao, qrSessao, webhookSecret, fotoPerfil, baixarMidiaMensagem } from '../lib/waha.js';
 import { uploadFile } from '../lib/storage.js';
@@ -366,46 +366,25 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
   const candidatos = await db.select().from(leads).where(escopoLeads);
   let lead = candidatos.find(l => mesmoNumero(l.telefone, numero));
 
-  // WhatsApp pessoal do corretor: número desconhecido NÃO vira lead sozinho (pode ser família,
-  // amigo...). Fica na lista privada dele até ele decidir "trazer pro CRM" ou "é pessoal".
-  // Número pessoal de DONO/GERENTE (ex: campanha de WhatsApp do gerente, igual na v1): quem escreve
-  // já vira card na carteira dele, sem passar pela lista de pendentes e sem roleta (pedido do dono 11-03).
-  let numeroDeGestor = false;
-  if (!lead && espelhoDeCorretor) {
-    const [dono] = await db.select({ role: perfis.role }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
-    numeroDeGestor = dono?.role === 'dono' || dono?.role === 'gerente';
-  }
-  if (!lead && espelhoDeCorretor && !numeroDeGestor) {
-    if (!fromMe) {
-      // v1 "possível duplicidade": quem escreveu já é lead de OUTRO corretor (ou está sem dono / rebatida)
-      // → dono e gerente decidem se transferem. Um aviso por lead por dia.
-      const daImob = await db.select({ id: leads.id, nome: leads.nome, telefone: leads.telefone, corretorId: leads.corretorId })
-        .from(leads).where(eq(leads.imobiliariaId, sessao.imobiliariaId));
-      const outro = daImob.find(l => mesmoNumero(l.telefone, numero));
-      if (outro && !avisouDuplicidadeHoje(outro.id)) {
-        const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
-        const gestores = await db.select({ id: perfis.id }).from(perfis)
-          .where(and(eq(perfis.imobiliariaId, sessao.imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
-        await notificar(gestores.map(g => ({
-          perfilId: g.id, leadId: outro.id, tipo: 'possivel_duplicidade',
-          titulo: 'Possível duplicidade: ' + (outro.nome || outro.telefone) + ' mandou mensagem pro WhatsApp de ' + (corr?.nome ?? 'outro corretor'),
-          texto: outro.corretorId ? 'O lead é de outro corretor — veja se transfere.' : 'O lead está sem corretor (bolsão) — veja se entrega pra quem ele procurou.',
-        })));
-      }
-      await db.insert(contatosPendentes).values({
-        imobiliariaId: sessao.imobiliariaId, corretorId: sessao.corretorId!, sessaoWhatsappId: sessao.id,
-        telefone: numero, nome: pushName || null,
-      }).onConflictDoUpdate({
-        target: [contatosPendentes.corretorId, contatosPendentes.telefone],
-        set: {
-          qtdMensagens: sql`${contatosPendentes.qtdMensagens} + 1`,
-          ultimaMensagemEm: new Date(),
-          ...(pushName ? { nome: pushName } : {}),
-        },
-      });
-      io.to('imobiliaria:' + sessao.imobiliariaId).emit('pendentes:mudou', { corretorId: sessao.corretorId });
+  // WhatsApp de corretor/gerente/dono: quem escreve já vira card na carteira de quem conectou o
+  // número, sem roleta — igual a campanha de WhatsApp da v1 (pedido do dono 11-03: "pra todos").
+  // A lista "Contatos novos" deixou de ser alimentada; número marcado como pessoal segue ignorado (acima).
+  if (!lead && espelhoDeCorretor && !fromMe) {
+    // v1 "possível duplicidade": quem escreveu já é lead de OUTRO corretor (ou está sem dono / rebatida)
+    // → dono e gerente decidem se transferem. Um aviso por lead por dia.
+    const daImob = await db.select({ id: leads.id, nome: leads.nome, telefone: leads.telefone, corretorId: leads.corretorId })
+      .from(leads).where(eq(leads.imobiliariaId, sessao.imobiliariaId));
+    const outro = daImob.find(l => mesmoNumero(l.telefone, numero));
+    if (outro && !avisouDuplicidadeHoje(outro.id)) {
+      const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
+      const gestores = await db.select({ id: perfis.id }).from(perfis)
+        .where(and(eq(perfis.imobiliariaId, sessao.imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
+      await notificar(gestores.map(g => ({
+        perfilId: g.id, leadId: outro.id, tipo: 'possivel_duplicidade',
+        titulo: 'Possível duplicidade: ' + (outro.nome || outro.telefone) + ' mandou mensagem pro WhatsApp de ' + (corr?.nome ?? 'outro corretor'),
+        texto: outro.corretorId ? 'O lead é de outro corretor — veja se transfere.' : 'O lead está sem corretor (bolsão) — veja se entrega pra quem ele procurou.',
+      })));
     }
-    return;
   }
 
   // sem lead e é mensagem RECEBIDA -> cria um lead novo na coluna "Lead Novo"
