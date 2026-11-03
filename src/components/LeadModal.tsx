@@ -354,22 +354,56 @@ export function LeadModal() {
                 <button onClick={salvarNota} disabled={nota.trim().length < 1} style={{ padding: '9px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600, opacity: nota.trim().length < 1 ? 0.5 : 1 }}>Anotar</button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {eventos.map((ev, i) => (
-                  <div key={ev.id} style={{ display: 'flex', gap: 16 }}>
-                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 'none' }}>
-                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: ev.tipo === 'nota' ? 'var(--line)' : 'var(--terra)', marginTop: 5 }} />
-                      {i < eventos.length - 1 && <span style={{ width: 1, flex: 1, background: 'var(--line)' }} />}
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0, paddingBottom: 20 }}>
-                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600 }}>{ev.descricao}</span>
-                      {ev.atorNome && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>por {ev.atorNome}</span>}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{quandoRelativo(ev.criadoEm)}</span>
+              {(() => {
+                // Pedido do dono (11-03): anotações do corretor em cima (o mais importante),
+                // movimentações no meio e o follow-up separado lá embaixo.
+                const anotacoes = eventos.filter(ev => ev.tipo === 'nota' || ev.tipo === 'auto');
+                const followups = eventos.filter(ev => ev.tipo === 'followup');
+                const demais = eventos.filter(ev => ev.tipo !== 'nota' && ev.tipo !== 'auto' && ev.tipo !== 'followup');
+                const linha = (lista: typeof eventos, cor: string) => (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {lista.map((ev, i) => (
+                      <div key={ev.id} style={{ display: 'flex', gap: 16 }}>
+                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 'none' }}>
+                          <span style={{ width: 9, height: 9, borderRadius: '50%', background: cor, marginTop: 5 }} />
+                          {i < lista.length - 1 && <span style={{ width: 1, flex: 1, background: 'var(--line)' }} />}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, paddingBottom: 20 }}>
+                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: ev.tipo === 'nota' ? 500 : 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ev.descricao}</span>
+                          {ev.atorNome && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>por {ev.atorNome}</span>}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{quandoRelativo(ev.criadoEm)}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {eventos.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Sem eventos ainda. As ações no lead (mudança de coluna, mensagens, distribuição, tarefas) aparecem aqui.</p>}
-              </div>
+                );
+                const titulo = (txt: string, qtd: number) => (
+                  <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {txt}<span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0, padding: '1px 7px', borderRadius: 20, background: 'var(--line)', color: 'var(--ink)' }}>{qtd}</span>
+                  </p>
+                );
+                if (eventos.length === 0) return <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Sem eventos ainda. As ações no lead (mudança de coluna, mensagens, distribuição, tarefas) aparecem aqui.</p>;
+                return (
+                  <>
+                    <div style={{ border: '1px solid var(--terraSoft)', borderRadius: 10, padding: '14px 14px 0', background: 'var(--card)', marginBottom: 18 }}>
+                      {titulo('Anotações do corretor', anotacoes.length)}
+                      {anotacoes.length ? linha(anotacoes, 'var(--terra)') : <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px' }}>Nenhuma anotação ainda. Use o campo acima pra registrar o que o cliente contou.</p>}
+                    </div>
+                    {demais.length > 0 && (
+                      <div style={{ marginBottom: 18 }}>
+                        {titulo('Movimentações do lead', demais.length)}
+                        {linha(demais, 'var(--muted)')}
+                      </div>
+                    )}
+                    {followups.length > 0 && (
+                      <div style={{ borderTop: '1px dashed var(--line)', paddingTop: 14 }}>
+                        {titulo('Follow-up', followups.length)}
+                        {linha(followups, 'var(--line)')}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </>
           )}
         </div>
