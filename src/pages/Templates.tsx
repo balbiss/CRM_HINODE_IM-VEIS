@@ -40,7 +40,7 @@ export default function Templates() {
         ))}
       </div>
       {templates.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nenhum template ainda — clique em "Novo template" pra criar o primeiro.</p>}
-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '18px 0 0' }}>No chat (Conversas ou card do lead), digite <strong>/</strong> pra abrir as mensagens prontas e filtre pelo título. {'{nome}'} vira o primeiro nome do cliente. Todo mundo da imobiliária usa as de todos; cada um edita as suas (dono e gerente editam todas).</p>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '18px 0 0' }}>No chat (Conversas ou card do lead), digite <strong>/</strong> pra abrir as mensagens prontas e filtre pelo título. {'{nome}'} vira o primeiro nome do cliente. Cada um vê e usa só as mensagens prontas que criou.</p>
 
       {editando && (
         <EditModal

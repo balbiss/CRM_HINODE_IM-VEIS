@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { templatesMensagem, perfis } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -8,8 +8,8 @@ import { requireAuth } from '../middleware/auth.js';
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth);
 
-// Mensagens prontas (regra da v1): todo mundo da imobiliária vê e usa as de todos — no chat é só digitar
-// "/". Cada um edita/apaga as que criou; dono e gerente mexem em qualquer uma.
+// Mensagens prontas: cada um (corretor, gerente ou dono) vê, usa, edita e apaga só as que criou
+// (pedido do dono 11-06: "cada um tem que ver só os seus").
 
 templatesRouter.get('/', async (req, res) => {
   const rows = await db.select({
@@ -18,11 +18,8 @@ templatesRouter.get('/', async (req, res) => {
     criadoPor: templatesMensagem.criadoPor, autorNome: perfis.nome,
   }).from(templatesMensagem)
     .innerJoin(perfis, eq(perfis.id, templatesMensagem.criadoPor))
-    .where(eq(perfis.imobiliariaId, req.auth!.imobiliariaId))
-    .orderBy(desc(templatesMensagem.id));
-  const meus = rows.filter(r => r.criadoPor === req.auth!.sub);
-  const outros = rows.filter(r => r.criadoPor !== req.auth!.sub).sort((a, b) => (a.autorNome ?? '').localeCompare(b.autorNome ?? '') || a.titulo.localeCompare(b.titulo));
-  res.json([...meus.sort((a, b) => a.titulo.localeCompare(b.titulo)), ...outros]);
+    .where(and(eq(perfis.imobiliariaId, req.auth!.imobiliariaId), eq(templatesMensagem.criadoPor, req.auth!.sub)));
+  res.json(rows.sort((a, b) => a.titulo.localeCompare(b.titulo)));
 });
 
 const anexoSchema = z.object({ url: z.string(), nome: z.string().optional(), tipo: z.string().optional() });
@@ -41,14 +38,14 @@ templatesRouter.post('/', async (req, res) => {
   res.status(201).json(row);
 });
 
-/** O template existe nesta imobiliária e a pessoa pode mexer nele (autor, ou dono/gerente). */
+/** O template existe nesta imobiliária e foi criado por quem está mexendo. */
 async function podeMexer(id: string, req: import('express').Request) {
-  const { sub, role, imobiliariaId } = req.auth!;
+  const { sub, imobiliariaId } = req.auth!;
   const [t] = await db.select({ id: templatesMensagem.id, criadoPor: templatesMensagem.criadoPor })
     .from(templatesMensagem).innerJoin(perfis, eq(perfis.id, templatesMensagem.criadoPor))
     .where(and(eq(templatesMensagem.id, id), eq(perfis.imobiliariaId, imobiliariaId))).limit(1);
   if (!t) return false;
-  return t.criadoPor === sub || role === 'dono' || role === 'gerente';
+  return t.criadoPor === sub;
 }
 
 templatesRouter.patch('/:id', async (req, res) => {
