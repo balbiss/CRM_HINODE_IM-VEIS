@@ -1,3 +1,4 @@
+import { CampoMensagem } from './CampoMensagem';
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
 import { dataHoraCompleta } from '../lib/datas';
@@ -209,7 +210,7 @@ export function LeadModal() {
                         {m.respostaA && <CitacaoNoBalao id={m.respostaA} msgs={(leadId && chats[leadId]) || []} leadNome={L.nome} out={m.out} />}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFimChat} />}
                         {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
-                        {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
+                        {m.texto && <span style={{ display: 'block', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.texto}</span>}
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
                       </span>
                     </div>
@@ -234,7 +235,7 @@ export function LeadModal() {
                 <button onClick={() => setProntasAbertas(v => !v)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>Mensagens prontas</button>
                 <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>ou digite / no campo</span>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -275,7 +276,7 @@ export function LeadModal() {
                     }
                   }}
                 />
-                <input data-campo-chat value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} placeholder="Escreva uma mensagem… (/ = mensagens prontas)" style={{ flex: 1, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                <CampoMensagem value={draft} onChange={setDraft} onEnviar={sendMsg} placeholder="Escreva uma mensagem… (/ = mensagens prontas)" />
                 <button onClick={sendMsg} style={{ padding: '12px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Enviar</button>
               </div>
             </>

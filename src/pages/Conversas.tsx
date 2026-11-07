@@ -1,3 +1,4 @@
+import { CampoMensagem } from '../components/CampoMensagem';
 import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
@@ -244,7 +245,7 @@ export default function Conversas() {
                         {m.respostaA && <CitacaoNoBalao id={m.respostaA} msgs={thread(CL)} leadNome={CL.nome} out={m.out} />}
                         {m.anexoUrl && <AnexoMensagem url={m.anexoUrl} tipo={m.anexoTipo} nome={m.anexoNome} onLoad={paraOFim} />}
                         {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
-                        {m.texto && <span style={{ display: 'block' }}>{m.texto}</span>}
+                        {m.texto && <span style={{ display: 'block', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.texto}</span>}
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
                       </span>
                     </div>
@@ -305,7 +306,7 @@ export default function Conversas() {
                       }
                     }}
                   />
-                  <input data-campo-chat value={convDraft} onChange={e => setConvDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendConv()} placeholder="Mensagem · digite / pras mensagens prontas" style={{ flex: 1, minWidth: 0, padding: '11px 14px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }} />
+                  <CampoMensagem value={convDraft} onChange={setConvDraft} onEnviar={sendConv} placeholder="Mensagem · digite / pras mensagens prontas" padding="11px 14px" />
                   <button onClick={sendConv} style={{ padding: '11px 20px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, flex: 'none' }}>Enviar</button>
                 </div>
               </div>

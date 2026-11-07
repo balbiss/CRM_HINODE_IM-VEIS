@@ -1,5 +1,7 @@
 import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useState } from 'react';
+import { SelectStatus } from './SelectStatus';
+import { opcoesDeStatus } from '../lib/statusLista';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { STATUS_VISITA, type Lead } from '../lib/data';
@@ -162,9 +164,10 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
             </div>
             <div>
               <label style={rotuloCss}>Status do Kanban</label>
-              <select value={L.colunaId} disabled={travado} onChange={e => move(L.id, e.target.value)} style={{ ...inputCss, opacity: travado ? 0.6 : 1 }}>
-                {colunas.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
-              </select>
+              {(() => {
+                const { opcoes, valor } = opcoesDeStatus(colunas, L.colunaId);
+                return <SelectStatus value={valor} opcoes={opcoes} disabled={travado} onChange={id => move(L.id, id)} style={inputCss} />;
+              })()}
             </div>
           </div>
         </Bloco>

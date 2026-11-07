@@ -61,7 +61,7 @@ export function BotaoResponder({ leadId, msgId, out }: { leadId: string; msgId: 
 }
 
 function focarCampo() {
-  setTimeout(() => (document.querySelector('[data-campo-chat]') as HTMLInputElement | null)?.focus(), 30);
+  setTimeout(() => (document.querySelector('[data-campo-chat]') as HTMLElement | null)?.focus(), 30);
 }
 
 /** Props pro balão: 2 cliques = responder. */

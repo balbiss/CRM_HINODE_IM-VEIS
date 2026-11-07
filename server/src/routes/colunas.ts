@@ -22,11 +22,20 @@ export function colunasRouter(io: SocketServer) {
     cor: z.string().max(40).nullable().optional(),
   });
 
+  // Nome repetido confunde a lista de status do card (dono 11-07: TAREFAS 3x, AGENDADO 2x) → não deixa.
+  async function nomeJaExiste(imobiliariaId: string, titulo: string, menosId?: string) {
+    const rows = await db.select({ id: colunasKanban.id, titulo: colunasKanban.titulo }).from(colunasKanban)
+      .where(eq(colunasKanban.imobiliariaId, imobiliariaId));
+    const k = (t: string) => t.trim().toLocaleUpperCase('pt-BR');
+    return rows.some(r => r.id !== menosId && k(r.titulo) === k(titulo));
+  }
+
   // Criar coluna nova (sempre no fim). Colunas criadas pelo usuário têm slug null.
   router.post('/', requireRole('dono', 'gerente'), async (req, res) => {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Título da coluna é obrigatório' });
     const { imobiliariaId } = req.auth!;
+    if (await nomeJaExiste(imobiliariaId, parsed.data.titulo)) return res.status(409).json({ error: 'Já existe uma coluna com esse nome' });
     const [{ max }] = await db.select({ max: sql<number>`coalesce(max(${colunasKanban.ordem}), -1)` })
       .from(colunasKanban).where(eq(colunasKanban.imobiliariaId, imobiliariaId));
     const [row] = await db.insert(colunasKanban).values({
@@ -43,6 +52,7 @@ export function colunasRouter(io: SocketServer) {
     const [existe] = await db.select({ id: colunasKanban.id }).from(colunasKanban)
       .where(and(eq(colunasKanban.id, req.params.id), eq(colunasKanban.imobiliariaId, imobiliariaId))).limit(1);
     if (!existe) return res.status(404).json({ error: 'Coluna não encontrada' });
+    if (parsed.data.titulo && await nomeJaExiste(imobiliariaId, parsed.data.titulo, req.params.id)) return res.status(409).json({ error: 'Já existe uma coluna com esse nome' });
     const patch: Record<string, unknown> = {};
     if (parsed.data.titulo) patch.titulo = parsed.data.titulo.trim();
     if (parsed.data.cor !== undefined) patch.cor = parsed.data.cor;

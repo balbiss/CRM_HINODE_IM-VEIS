@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { eq } from 'drizzle-orm';
 import { verifyToken, type JwtClaims } from '../lib/jwt.js';
 import { db } from '../db/client.js';
-import { imobiliarias } from '../db/schema.js';
+import { imobiliarias, perfis } from '../db/schema.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -35,6 +35,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       .where(eq(imobiliarias.id, claims.imobiliariaId))
       .limit(1);
     if (!imob) return res.status(401).json({ error: 'Imobiliária não encontrada' });
+    const [perfil] = await db.select({ bloqueado: perfis.bloqueado }).from(perfis).where(eq(perfis.id, claims.sub)).limit(1);
+    if (!perfil || perfil.bloqueado) return res.status(401).json({ error: 'Acesso bloqueado. Fale com o gerente ou dono.' });
     if (imob.status !== 'ativa') {
       return res.status(403).json({
         error: 'ACESSO_SUSPENSO',

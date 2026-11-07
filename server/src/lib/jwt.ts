@@ -13,8 +13,11 @@ function getSecret(): string {
   return secret;
 }
 
+// Sessão da equipe: 30 dias, renovada sozinha toda vez que o app abre/volta pro foco (GET /api/auth/me devolve token novo).
+// Antes era 8h: o corretor deixava o CRM aberto de um dia pro outro e tudo falhava com 'Token inválido ou expirado'.
+// Bloquear alguém em Equipe corta na hora (requireAuth confere perfis.bloqueado a cada request).
 export function signToken(claims: JwtClaims): string {
-  const options: jwt.SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN || '8h') as jwt.SignOptions['expiresIn'] };
+  const options: jwt.SignOptions = { expiresIn: '30d' };
   return jwt.sign(claims, getSecret(), options);
 }
 

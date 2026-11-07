@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import {
   type Role, type ColId, type Lead, type ChatMsg, type AnexoTipo,
 } from '../lib/data';
-import { apiFetch, type ApiError } from '../lib/api';
+import { apiFetch, quandoSessaoExpirar, type ApiError } from '../lib/api';
 import { isBusinessHoursOpen, HORARIO_ATENDIMENTO_PADRAO, type DiaAtendimento } from '../lib/schedule';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import { mapRemoteLead, slugToColunaId, type RemoteColuna, type RemotePerfil, type RemoteLead } from '../lib/remoteLeads';
@@ -617,7 +617,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ token, authLoading: true });
     apiFetch<Omit<AuthUser, 'emPlantao'> & { emPlantao: boolean }>('/api/auth/me', token)
       .then(perfil => {
-        set({ me: perfil as AuthUser, authLoading: false });
+        const novo = (perfil as { token?: string }).token;
+        if (novo) { localStorage.setItem('nova_token', novo); ultimaRenovacao = Date.now(); }
+        set({ me: perfil as AuthUser, authLoading: false, ...(novo ? { token: novo } : {}) });
         get().connectRealtime();
         get().fetchKanbanData();
         get().fetchTemplates();
@@ -634,6 +636,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if ((perfil as AuthUser).role === 'corretor') pedirPermissaoNotificacao();
       })
       .catch((e: ApiError) => {
+        // sem internet / servidor reiniciando (deploy): mantém a sessão e tenta de novo daqui a pouco
+        if (!e?.status || e.status >= 500) { set({ authLoading: false }); setTimeout(() => { if (!get().me) get().hydrateAuth(); }, 5000); return; }
         localStorage.removeItem('nova_token');
         const suspenso = /ACESSO_SUSPENSO|suspenso/i.test(e?.message || '');
         set({
@@ -924,7 +928,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           return;
         }
         if (e.motivo === 'registrar_venda') { set({ vendaLeadId: id }); get().toast(e.message); return; }
-        get().toast(e.status === 409 ? e.message : 'Não deu pra salvar — ' + l.nome + ' voltou pra coluna anterior');
+        get().toast(e.status === 409 ? e.message : 'Não deu pra salvar (' + (e.message || 'erro') + ') — ' + l.nome + ' voltou pra coluna anterior');
       });
   },
   fetchCompromissos: async () => {
@@ -2379,3 +2383,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     return { criados, ignorados };
   },
 }));
+
+// ---- Sessão: renova sozinha e, se vencer, volta pro login com aviso ----
+let ultimaRenovacao = 0;
+quandoSessaoExpirar(() => {
+  const st = useAppStore.getState();
+  if (!st.token) return;
+  st.logout();
+  useAppStore.setState({ authError: 'Sua sessão expirou. Entre de novo pra continuar.' });
+});
+async function renovarSessao() {
+  const token = useAppStore.getState().token;
+  if (!token || Date.now() - ultimaRenovacao < 60 * 60 * 1000) return;
+  ultimaRenovacao = Date.now();
+  try {
+    const r = await apiFetch<{ token?: string }>('/api/auth/me', token);
+    if (r.token && useAppStore.getState().token === token) { localStorage.setItem('nova_token', r.token); useAppStore.setState({ token: r.token }); }
+  } catch { /* 401 já cai no quandoSessaoExpirar; erro de rede tenta na próxima */ }
+}
+if (typeof window !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void renovarSessao(); });
+  window.addEventListener('focus', () => void renovarSessao());
+  setInterval(() => void renovarSessao(), 30 * 60 * 1000);
+}

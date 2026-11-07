@@ -75,7 +75,9 @@ authRouter.post('/esqueci-senha', async (req, res) => {
 authRouter.get('/me', requireAuth, async (req, res) => {
   const [perfil] = await db.select().from(perfis).where(eq(perfis.id, req.auth!.sub)).limit(1);
   if (!perfil) return res.status(404).json({ error: 'Perfil não encontrado' });
-  res.json({ id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, telefone: perfil.telefone, senhaProvisoria: perfil.senhaProvisoria });
+  // renova a sessão: o app chama /me ao abrir e ao voltar pro foco, então quem usa todo dia nunca é deslogado
+  const token = signToken({ sub: perfil.id, imobiliariaId: perfil.imobiliariaId, role: perfil.role, nome: perfil.nome });
+  res.json({ id: perfil.id, nome: perfil.nome, email: perfil.email, role: perfil.role, emPlantao: perfil.emPlantao, telefone: perfil.telefone, senhaProvisoria: perfil.senhaProvisoria, token });
 });
 
 // Ajustes → Perfil: a própria pessoa edita nome, e-mail (é o login) e telefone.
