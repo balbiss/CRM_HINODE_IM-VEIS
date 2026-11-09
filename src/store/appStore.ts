@@ -93,6 +93,7 @@ export interface RemoteMensagem {
   ackStatus?: number | null;
   transcricao?: string | null;
   respostaA?: string | null;
+  reacoes?: { emoji: string; de: 'lead' | 'equipe' }[];
 }
 
 /** Resumo da última mensagem de um lead — usado só pra saber QUAIS leads já tiveram interação
@@ -108,7 +109,7 @@ function mapRemoteMensagem(r: RemoteMensagem): ChatMsg {
   return {
     id: r.id, side: r.direcao, texto: r.texto ?? '', hora: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     bot: r.canal === 'followup', ia: r.canal === 'ia', off, anexoUrl: r.anexoUrl, anexoTipo: r.anexoTipo, anexoNome: r.anexoNome ?? undefined, ack: r.ackStatus ?? undefined, transcricao: r.transcricao ?? undefined,
-    respostaA: r.respostaA ?? null,
+    respostaA: r.respostaA ?? null, reacoes: r.reacoes ?? [],
   };
 }
 
@@ -766,6 +767,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
         }
         return mudou ? { chats: next } : {};
+      });
+    });
+    socket.off('mensagem:reacao').on('mensagem:reacao', (msg: { id: string; leadId: string; reacoes: { emoji: string; de: 'lead' | 'equipe' }[] }) => {
+      set(s => {
+        const lista = s.chats[msg.leadId];
+        if (!lista?.some(m => m.id === msg.id)) return {};
+        return { chats: { ...s.chats, [msg.leadId]: lista.map(m => (m.id === msg.id ? { ...m, reacoes: msg.reacoes } : m)) } };
       });
     });
     socket.off('lead:removido').on('lead:removido', (msg: { id: string }) => {

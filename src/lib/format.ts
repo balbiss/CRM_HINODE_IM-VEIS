@@ -37,3 +37,13 @@ export const canalPill = (c: string) => {
 export const thumb = (i: number, size: number) =>
   'width:' + size + 'px;height:' + size + 'px;border-radius:7px;flex:none;background:repeating-linear-gradient(' +
   (35 + i * 20) + 'deg,var(--line) 0 4px,var(--bg) 4px 9px);border:1px solid var(--line);display:block';
+
+/** Telefone pra leitura: +5563992179535 → (63) 99217-9535. Número estrangeiro/estranho volta como veio. */
+export function fmtTelefone(t: string | null | undefined): string {
+  if (!t) return '';
+  let d = t.replace(/\D/g, '');
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+  if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+  return t;
+}

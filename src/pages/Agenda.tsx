@@ -1,3 +1,4 @@
+import { fmtTelefone } from '../lib/format';
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore, type Compromisso } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -109,7 +110,7 @@ export default function Agenda() {
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.titulo}</span>
             <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {i.lead?.tel ? i.lead.tel + ' · ' : ''}{i.tipo === 'contato' ? (isManager ? i.lead?.corretor ?? '' : 'Contato') : i.tipo === 'tarefa' ? 'Tarefa · ' + i.sub : i.sub}
+              {i.lead?.tel ? fmtTelefone(i.lead.tel) + ' · ' : ''}{i.tipo === 'contato' ? (isManager ? i.lead?.corretor ?? '' : 'Contato') : i.tipo === 'tarefa' ? 'Tarefa · ' + i.sub : i.sub}
             </span>
           </span>
         </button>

@@ -31,6 +31,10 @@ import { tagsRouter } from './routes/tags.js';
 import { configRouter } from './routes/config.js';
 import { integracoesRouter } from './routes/integracoes.js';
 import { whatsappRouter } from './routes/whatsapp.js';
+import { sincronizarWebhooks } from './lib/waha.js';
+import { db as dbBoot } from './db/client.js';
+import { sessoesWhatsapp as sessoesBoot } from './db/schema.js';
+import { isNotNull as isNotNullBoot } from 'drizzle-orm';
 import { whatsappOficialRouter } from './routes/whatsappOficial.js';
 import { assistenteRouter } from './routes/assistente.js';
 import { plataformaRouter } from './routes/plataforma.js';
@@ -183,4 +187,12 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 ensureBucket()
   .catch(err => console.error('MinIO: não foi possível preparar o bucket —', err.message))
-  .finally(() => httpServer.listen(port, () => console.log('NOVA backend rodando em http://localhost:' + port)));
+  .finally(() => httpServer.listen(port, () => {
+    console.log('NOVA backend rodando em http://localhost:' + port);
+    // sessões antigas passam a receber os eventos novos do WhatsApp (ex.: reações) — 1 vez, 30s após subir
+    setTimeout(() => {
+      dbBoot.select({ n: sessoesBoot.sessionName }).from(sessoesBoot).where(isNotNullBoot(sessoesBoot.sessionName))
+        .then(rows => sincronizarWebhooks(rows.map(r => r.n!).filter(Boolean)))
+        .catch(e => console.error('[waha] sync webhooks:', (e as Error).message));
+    }, 30000);
+  }));

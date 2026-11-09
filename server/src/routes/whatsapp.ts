@@ -78,6 +78,19 @@ export function whatsappRouter(io: SocketServer) {
         return;
       }
 
+      // --- reação (👍❤️...) a uma mensagem: evento próprio do WAHA, ou reactionMessage dentro do message.any ---
+      {
+        const pr = ev.payload || {};
+        const reacaoMsg = pr._data?.Message?.reactionMessage;
+        if (ev.event === 'message.reaction' || reacaoMsg) {
+          const alvo: string = pr.reaction?.messageId || reacaoMsg?.key?.ID || reacaoMsg?.key?.id || '';
+          const emoji: string = pr.reaction?.text ?? reacaoMsg?.text ?? '';
+          const deMim = !!(pr.fromMe ?? pr._data?.Info?.IsFromMe);
+          if (alvo) await aplicarReacao(io, alvo, emoji, deMim ? 'equipe' : 'lead');
+          return;
+        }
+      }
+
       if (ev.event !== 'message' && ev.event !== 'message.any') return;
       const p = ev.payload || {};
       const info = p._data?.Info || p._data?.info || {};
@@ -343,6 +356,23 @@ function avisouDuplicidadeHoje(leadId: string) {
   if (avisosDuplicidade.get(leadId) === hoje) return true;
   avisosDuplicidade.set(leadId, hoje);
   return false;
+}
+
+/** Guarda a reação na mensagem certa (uma por lado; emoji vazio = tirou a reação) e avisa a tela.
+ *  O id que o WAHA manda pode vir completo (true_5511...@c.us_3EB0...) ou só o final (3EB0...) — casa pelos dois. */
+async function aplicarReacao(io: SocketServer, alvo: string, emoji: string, de: 'lead' | 'equipe') {
+  const final = alvo.split('_').pop() || alvo;
+  if (final.length < 8) return;
+  const [msg] = await db.select({ id: mensagensWhatsapp.id, leadId: mensagensWhatsapp.leadId, reacoes: mensagensWhatsapp.reacoes })
+    .from(mensagensWhatsapp)
+    .where(or(eq(mensagensWhatsapp.waMessageId, alvo), sql`${mensagensWhatsapp.waMessageId} like ${'%' + final}`))
+    .orderBy(sql`${mensagensWhatsapp.enviadoEm} desc`).limit(1);
+  if (!msg) return;
+  const reacoes = (msg.reacoes ?? []).filter(r => r.de !== de);
+  if (emoji) reacoes.push({ emoji, de });
+  await db.update(mensagensWhatsapp).set({ reacoes }).where(eq(mensagensWhatsapp.id, msg.id));
+  const [l] = await db.select({ imob: leads.imobiliariaId }).from(leads).where(eq(leads.id, msg.leadId)).limit(1);
+  if (l) io.to('imobiliaria:' + l.imob).emit('mensagem:reacao', { id: msg.id, leadId: msg.leadId, reacoes });
 }
 
 export async function processarMensagem(io: SocketServer, sessao: typeof sessoesWhatsapp.$inferSelect, m: MensagemWhatsapp) {

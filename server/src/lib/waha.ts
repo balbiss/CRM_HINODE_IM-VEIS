@@ -25,7 +25,8 @@ async function waha<T = unknown>(path: string, opts: WahaOpts = {}): Promise<T> 
 
 // message.any cobre recebidas E enviadas (uma vez cada — registrar 'message' junto
 // duplica). message.ack traz o "visto" (entregue/lido). session.status mantém o status.
-const EVENTOS = ['message.any', 'message.ack', 'session.status'];
+// message.reaction: 👍❤️ do WhatsApp (não vem no message.any).
+const EVENTOS = ['message.any', 'message.ack', 'message.reaction', 'session.status'];
 
 function webhookConfig() {
   const url = publicUrl() ? `${publicUrl()}/api/whatsapp/webhook?secret=${encodeURIComponent(webhookSecret())}` : undefined;
@@ -256,4 +257,23 @@ export async function enviarMidia(sessionName: string, numero: string, url: stri
   if (tipo === 'audio') body.convert = true; // WAHA converte se não estiver no formato certo
   if (replyTo) body.reply_to = replyTo;
   return waha(endpoint, { method: 'POST', body });
+}
+
+/** Sessões criadas antes de um evento novo entrar na lista (ex.: message.reaction) não recebem esse evento.
+ *  No boot, confere cada sessão e, se faltar algum, regrava só o webhook (o WAHA reinicia a sessão
+ *  sem pedir QR de novo). Sessão que já está certa não é tocada. */
+export async function sincronizarWebhooks(sessionNames: string[]) {
+  if (!wahaConfigurado() || !publicUrl()) return;
+  const config = webhookConfig();
+  for (const nome of sessionNames) {
+    try {
+      const s = await waha<{ status?: string; config?: { webhooks?: { url?: string; events?: string[] }[] } }>(`/api/sessions/${nome}`);
+      const hook = s.config?.webhooks?.find(w => (w.url || '').includes('/api/whatsapp/webhook'));
+      if (!hook || EVENTOS.every(e => hook.events?.includes(e))) continue;
+      await waha(`/api/sessions/${nome}`, { method: 'PUT', body: { config: { ...(s.config || {}), ...config } } });
+      console.log('[waha] webhook atualizado (eventos novos) na sessão', nome);
+    } catch (e) {
+      console.error('[waha] não deu pra atualizar o webhook de', nome, (e as Error).message);
+    }
+  }
 }

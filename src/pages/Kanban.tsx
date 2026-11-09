@@ -4,12 +4,12 @@ import { LayoutGrid, List as ListIcon, X, FileText, MoreVertical, ChevronLeft, C
 import { dataHoraCompleta, dataHoraCurta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { canalPill } from '../lib/format';
+import { canalPill, fmtTelefone } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
 import { ChatAvatar } from '../components/ChatAvatar';
 import { foraDoKanban, perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
-import { Flame, Snowflake, Sun } from 'lucide-react';
+import { Flame, Snowflake, Sun, Phone } from 'lucide-react';
 
 type ViewMode = 'kanban' | 'lista';
 const corDaColuna = (slug: string | null) => (slug === 'venda' ? 'var(--olive)' : slug === 'novo' || slug === 'rebatida' ? 'var(--muted)' : 'var(--terra)');
@@ -62,7 +62,9 @@ export default function Kanban() {
   const [visoes, setVisoes] = useState<VisaoSalva[]>(() => lerVisoes());
 
   const canais = useMemo(() => [...new Set(allLeads.map(l => l.canal).filter(Boolean))].sort(), [allLeads]);
-  const filtroAtivo = (isManager && kbCorretor !== 'Todos os corretores') || !!kbTag || !!filterCanal;
+  // Prazo do próximo contato (gerente 11-09): só atrasados / só os de hoje — igual à tela de Tarefas, no Kanban
+  const [kbPrazo, setKbPrazo] = useState<'' | 'atrasados' | 'hoje'>('');
+  const filtroAtivo = (isManager && kbCorretor !== 'Todos os corretores') || !!kbTag || !!filterCanal || !!kbPrazo;
 
   const aplicarVisao = (v: VisaoSalva) => {
     if (isManager) setKbCorretor(v.corretor || 'Todos os corretores');
@@ -89,6 +91,7 @@ export default function Kanban() {
     if (isManager) setKbCorretor('Todos os corretores');
     if (kbTag) setKbTag(null);
     setFilterCanal(null);
+    setKbPrazo('');
   };
 
   useEffect(() => {
@@ -116,10 +119,21 @@ export default function Kanban() {
       : noFunil.filter(l => l.corretor === meNome);
     if (filterCanal) base = base.filter(l => l.canal === filterCanal);
     if (kbTag) base = base.filter(l => l.tags.includes(kbTag));
+    if (kbPrazo) {
+      const agora = Date.now();
+      const fimDoDia = new Date(); fimDoDia.setHours(23, 59, 59, 999);
+      // lead com o robô de follow-up rodando não conta (igual Tarefas)
+      const colFollow = colunas.find(c => c.slug === 'followup_auto')?.id;
+      base = base.filter(l => {
+        if (!l.proximoContatoEm || l.colunaId === colFollow) return false;
+        const t = +new Date(l.proximoContatoEm);
+        return kbPrazo === 'atrasados' ? t < agora : t >= agora && t <= +fimDoDia;
+      });
+    }
     const q = query.trim().toLowerCase();
     if (q) base = base.filter(l => l.nome.toLowerCase().includes(q) || l.tel.includes(q));
     return base;
-  }, [allLeads, isManager, kbCorretor, meNome, filterCanal, kbTag, query]);
+  }, [allLeads, isManager, kbCorretor, meNome, filterCanal, kbTag, query, kbPrazo, colunas]);
 
   const active = leads.filter(l => l.col !== 'rebatida');
   const countPorColuna = useMemo(() => {
@@ -197,6 +211,15 @@ export default function Kanban() {
                 {canais.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             )}
+            <select
+              value={kbPrazo}
+              onChange={e => setKbPrazo(e.target.value as '' | 'atrasados' | 'hoje')}
+              style={{ padding: '9px 12px', border: '1px solid ' + (kbPrazo ? (kbPrazo === 'atrasados' ? '#DC2626' : 'var(--terra)') : 'var(--line)'), borderRadius: 8, background: kbPrazo ? (kbPrazo === 'atrasados' ? 'rgba(220,38,38,.08)' : 'var(--terraSoft)') : 'var(--card)', color: kbPrazo === 'atrasados' ? '#DC2626' : kbPrazo ? 'var(--terra)' : 'var(--ink)', fontSize: 13, fontWeight: kbPrazo ? 600 : 400 }}
+            >
+              <option value="">Todos os contatos</option>
+              <option value="atrasados">Atrasados</option>
+              <option value="hoje">Para hoje</option>
+            </select>
             <select
               value=""
               onChange={e => {
@@ -380,10 +403,19 @@ export default function Kanban() {
                               </span>
                             )}
                             <span style={{ display: 'block', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nome}</span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, minWidth: 0 }}>
-                              <FileText size={11} strokeWidth={2} style={{ flex: 'none' }} />
-                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.corretor || (l.iaStatus === 'atendendo' ? 'IA atendendo' : 'Sem corretor')}</span>
-                            </span>
+                            {/* dono 11-09: telefone no card como na v1; corretor não precisa do próprio nome (só vê os dele) */}
+                            {isManager && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, minWidth: 0 }}>
+                                <FileText size={11} strokeWidth={2} style={{ flex: 'none' }} />
+                                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.corretor || (l.iaStatus === 'atendendo' ? 'IA atendendo' : 'Sem corretor')}</span>
+                              </span>
+                            )}
+                            {l.tel && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
+                                <Phone size={11} strokeWidth={2} style={{ flex: 'none' }} />
+                                {fmtTelefone(l.tel)}
+                              </span>
+                            )}
                             {l.criadoEm && (
                               <span title={'Entrou no CRM em ' + dataHoraCompleta(l.criadoEm)} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
                                 <Clock size={11} strokeWidth={2} style={{ flex: 'none' }} />

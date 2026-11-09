@@ -1,3 +1,4 @@
+import { Reacoes } from '../components/Reacoes';
 import { CampoMensagem } from '../components/CampoMensagem';
 import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -247,6 +248,7 @@ export default function Conversas() {
                         {m.transcricao && <span style={{ display: 'block', fontSize: 12.5, fontStyle: 'italic', opacity: 0.85, marginTop: 6 }}>Transcrição: “{m.transcricao}”</span>}
                         {m.texto && <span style={{ display: 'block', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.texto}</span>}
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, fontSize: 10.5, opacity: 0.75, marginTop: 5 }}>{m.stamp}<Visto estado={m.visto} /></span>
+                        <Reacoes reacoes={m.reacoes} out={m.out} />
                       </span>
                     </div>
                   </div>

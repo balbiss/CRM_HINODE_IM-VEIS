@@ -1,0 +1,1 @@
+ALTER TABLE "mensagens_whatsapp" ADD COLUMN "reacoes" jsonb DEFAULT '[]'::jsonb NOT NULL;

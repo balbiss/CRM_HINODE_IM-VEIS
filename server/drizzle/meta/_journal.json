@@ -400,6 +400,13 @@
       "when": 1793666883924,
       "tag": "0056_spicy_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794249184547,
+      "tag": "0057_classy_ultragirl",
+      "breakpoints": true
     }
   ]
 }

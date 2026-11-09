@@ -447,6 +447,8 @@ export const mensagensWhatsapp = pgTable('mensagens_whatsapp', {
   // "Responder" igual ao WhatsApp: a mensagem que esta cita (vale nos dois sentidos — o corretor
   // respondendo pelo CRM e o lead respondendo uma mensagem específica no celular dele).
   respostaA: uuid('resposta_a').references((): AnyPgColumn => mensagensWhatsapp.id, { onDelete: 'set null' }),
+  // Reações do WhatsApp (👍❤️...) em cima desta mensagem: uma por lado — 'lead' (o cliente) e 'equipe' (o número do CRM).
+  reacoes: jsonb('reacoes').$type<{ emoji: string; de: 'lead' | 'equipe' }[]>().notNull().default([]),
   // id da mensagem no CRM OKA (v1) — importação idempotente
   okaId: uuid('oka_id').unique(),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }).notNull().defaultNow(),
