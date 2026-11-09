@@ -404,9 +404,15 @@ async function escolherLote(limite: number): Promise<Exec[]> {
   ))).map(r => r.c));
   const ritmo = new Map((await db.select().from(followupRitmoCorretor)).map(r => [r.corretorId, r.liberadoEm]));
   const conectado = new Map<string, boolean>();
+  // fluxo desligado (Inativo) ou arquivado: os follow-ups que já estavam rodando nele param de mandar
+  // (dono 11-07: Bárbara desligou e o CRM seguiu enviando). Religar o fluxo volta de onde parou.
+  const fluxoLigado = new Map((await db.select({ id: followupFluxos.id, ativo: followupFluxos.ativo, arq: followupFluxos.arquivadoEm })
+    .from(followupFluxos).where(inArray(followupFluxos.id, [...new Set(vencidas.map(v => v.fluxoId))])))
+    .map(f => [f.id, f.ativo && !f.arq]));
 
   for (const ex of vencidas) {
     if (!ex.corretorId || emVoo.has(ex.corretorId)) continue;
+    if (!fluxoLigado.get(ex.fluxoId)) continue;
     const lib = ritmo.get(ex.corretorId);
     if (lib && +lib > +agora) continue;
     if (ex.iniciadoPor !== 'manual') {
@@ -448,6 +454,8 @@ async function enviarPasso(io: SocketServer, ex: Exec): Promise<boolean> {
   // reivindica: confere de novo, imediatamente antes de mandar, que nada mudou desde o lote
   const [atual] = await db.select().from(followupExecucoes).where(eq(followupExecucoes.id, ex.id)).limit(1);
   if (!atual || atual.status !== 'ativa' || atual.passoAtual !== ex.passoAtual) return false;
+  const [fx] = await db.select({ ativo: followupFluxos.ativo, arq: followupFluxos.arquivadoEm }).from(followupFluxos).where(eq(followupFluxos.id, ex.fluxoId)).limit(1);
+  if (!fx?.ativo || fx.arq) { await db.update(followupExecucoes).set({ reservadoEm: null }).where(eq(followupExecucoes.id, ex.id)); return false; }
   if (atual.enviandoPasso === ex.passoAtual && atual.enviandoDesde && Date.now() - +atual.enviandoDesde < 10 * 60000) return false;
   if (lead.descartadoEm || lead.corretorId !== ex.corretorId) { await db.update(followupExecucoes).set({ reservadoEm: null }).where(eq(followupExecucoes.id, ex.id)); return false; }
   const [conversa] = await db.select({ id: mensagensWhatsapp.id }).from(mensagensWhatsapp).where(and(

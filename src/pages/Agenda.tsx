@@ -4,6 +4,8 @@ import { useRoleInfo } from '../lib/selectors';
 import { foraDoKanban, perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { HORARIOS, hojeLocal, isoLocal } from '../components/ModaisRegrasOka';
 import type { Lead } from '../lib/data';
+import { SelectStatus } from '../components/SelectStatus';
+import { opcoesDeStatus } from '../lib/statusLista';
 
 /** Agenda (v1): todo lead com corretor tem um próximo contato. Aba Tarefas = Atrasadas / A fazer hoje /
  *  Futuras; Calendário com a agenda do dia (visitas/FID e compromissos da equipe primeiro, depois os
@@ -14,7 +16,7 @@ const chave = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padS
 const hora = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
-type Item = { id: string; quando: string; tipo: 'visita' | 'compromisso' | 'contato' | 'tarefa'; titulo: string; sub: string; leadId?: string; comp?: Compromisso; robo?: string | null };
+type Item = { id: string; quando: string; tipo: 'visita' | 'compromisso' | 'contato' | 'tarefa'; titulo: string; sub: string; leadId?: string; comp?: Compromisso; robo?: string | null; lead?: Lead };
 
 export default function Agenda() {
   const { isManager, meNome } = useRoleInfo();
@@ -31,7 +33,12 @@ export default function Agenda() {
   const openLead = useAppStore(s => s.openLead);
   const ask = useAppStore(s => s.ask);
   const me = useAppStore(s => s.me);
+  const move = useAppStore(s => s.move);
+  const patchLead = useAppStore(s => s.patchLead);
   useEffect(() => { fetchTarefas(); fetchCompromissos(); }, [fetchTarefas, fetchCompromissos]);
+  // relógio da tela: passou do horário marcado e ninguém mexeu → vai pra Atrasadas sozinho (gerente 11-09)
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setAgora(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   const [aba, setAba] = useState<'tarefas' | 'calendario'>('tarefas');
   const [filtroCorretor, setFiltroCorretor] = useState('');
@@ -49,9 +56,9 @@ export default function Agenda() {
   const itens: Item[] = useMemo(() => {
     const out: Item[] = [];
     for (const l of ativos) {
-      if (l.dataVisita) out.push({ id: 'v' + l.id, quando: l.dataVisita, tipo: 'visita', titulo: (l.tipoVisita || 'VISITA') + ' · ' + l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (l.statusVisita || 'AGENDADA'), leadId: l.id });
+      if (l.dataVisita) out.push({ id: 'v' + l.id, quando: l.dataVisita, tipo: 'visita', titulo: (l.tipoVisita || 'VISITA') + ' · ' + l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (l.statusVisita || 'AGENDADA'), leadId: l.id, lead: l });
       // lead com o robô rodando não entra nas tarefas (quem cuida dele é o follow-up)
-      if (l.proximoContatoEm && l.colunaId !== colFollow) out.push({ id: 'c' + l.id, quando: l.proximoContatoEm, tipo: 'contato', titulo: l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (colunas.find(c => c.id === l.colunaId)?.titulo ?? ''), leadId: l.id });
+      if (l.proximoContatoEm && l.colunaId !== colFollow) out.push({ id: 'c' + l.id, quando: l.proximoContatoEm, tipo: 'contato', titulo: l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (colunas.find(c => c.id === l.colunaId)?.titulo ?? ''), leadId: l.id, lead: l });
     }
     for (const c of compromissos) out.push({ id: 'p' + c.id, quando: c.inicio, tipo: 'compromisso', titulo: c.titulo, sub: [c.tipo, c.local].filter(Boolean).join(' · '), comp: c });
     for (const t of tarefas) {
@@ -66,8 +73,9 @@ export default function Agenda() {
 
   const hoje = chave(new Date());
   const contatos = itens.filter(i => i.tipo === 'contato' || i.tipo === 'tarefa');
-  const atrasadas = contatos.filter(i => chave(new Date(i.quando)) < hoje);
-  const deHoje = itens.filter(i => chave(new Date(i.quando)) === hoje);
+  // contato/tarefa atrasa pelo HORÁRIO (não só pelo dia): marcado 10h e ninguém mexeu até 10h → Atrasadas
+  const atrasadas = contatos.filter(i => +new Date(i.quando) < agora);
+  const deHoje = itens.filter(i => chave(new Date(i.quando)) === hoje && !atrasadas.includes(i));
   const futuras = itens.filter(i => chave(new Date(i.quando)) > hoje).slice(0, 200);
   const ordemDia = (a: Item, b: Item) => (a.tipo === 'visita' || a.tipo === 'compromisso' ? 0 : 1) - (b.tipo === 'visita' || b.tipo === 'compromisso' ? 0 : 1) || +new Date(a.quando) - +new Date(b.quando);
   const doDia = itens.filter(i => chave(new Date(i.quando)) === diaSel).sort(ordemDia);
@@ -87,20 +95,42 @@ export default function Agenda() {
   const celulas = Array.from({ length: 42 }, (_, i) => { const n = i - primeiroDia + 1; return n < 1 || n > diasNoMes ? null : { n, key: chave(new Date(ref.getFullYear(), ref.getMonth(), n)) }; });
   const podeEditar = (c: Compromisso) => c.criadoPor === me?.id || isManager;
 
-  const linha = (i: Item, comData = false) => (
-    <button key={i.id} onClick={() => (i.comp ? setVerComp(i.comp) : i.leadId && openLead(i.leadId))}
-      style={{ display: 'flex', gap: 12, alignItems: 'center', width: '100%', textAlign: 'left', padding: '10px 14px', border: 'none', borderBottom: '1px solid var(--line)', background: i.tipo === 'compromisso' ? 'rgba(234,179,8,.10)' : 'none' }}>
-      <span style={{ width: comData ? 92 : 48, fontSize: 12, color: 'var(--muted)', flex: 'none' }}>{comData ? dataCurta(i.quando) + ' ' : ''}{hora(i.quando)}</span>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: i.tipo === 'visita' ? '#A855F7' : i.tipo === 'compromisso' ? '#CA8A04' : i.tipo === 'tarefa' ? 'var(--olive)' : 'var(--terra)' }} />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{i.titulo}</span>
-        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{i.tipo === 'contato' ? 'Contato · ' : i.tipo === 'tarefa' ? 'Tarefa · ' : ''}{i.sub}</span>
-      </span>
-      {i.tipo === 'tarefa' && <span onClick={e => { e.stopPropagation(); void toggleTarefa(i.id.slice(1), true); }} style={{ fontSize: 11.5, color: 'var(--olive)', fontWeight: 600 }}>concluir</span>}
-    </button>
-  );
+  // Linha em formato de lista (igual à Lista de leads): telefone visível e dá pra mudar status e próximo
+  // contato sem abrir o card (gerente 11-09). Visita/compromisso/tarefa avulsa seguem só com o resumo.
+  const linha = (i: Item, comData = false) => {
+    const l = i.tipo === 'contato' ? i.lead : undefined;
+    const atrasado = (i.tipo === 'contato' || i.tipo === 'tarefa') && +new Date(i.quando) < agora;
+    return (
+      <div key={i.id} className="agenda-linha" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderBottom: '1px solid var(--line)', background: i.tipo === 'compromisso' ? 'rgba(234,179,8,.10)' : 'none' }}>
+        <button onClick={() => (i.comp ? setVerComp(i.comp) : i.leadId && openLead(i.leadId))}
+          style={{ display: 'flex', gap: 12, alignItems: 'center', flex: '1 1 260px', minWidth: 0, textAlign: 'left', padding: 0, border: 'none', background: 'none' }}>
+          <span style={{ width: comData ? 92 : 48, fontSize: 12, color: atrasado ? '#DC2626' : 'var(--muted)', fontWeight: atrasado ? 700 : 400, flex: 'none' }}>{comData ? dataCurta(i.quando) + ' ' : ''}{hora(i.quando)}</span>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: i.tipo === 'visita' ? '#A855F7' : i.tipo === 'compromisso' ? '#CA8A04' : i.tipo === 'tarefa' ? 'var(--olive)' : 'var(--terra)' }} />
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.titulo}</span>
+            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {i.lead?.tel ? i.lead.tel + ' · ' : ''}{i.tipo === 'contato' ? (isManager ? i.lead?.corretor ?? '' : 'Contato') : i.tipo === 'tarefa' ? 'Tarefa · ' + i.sub : i.sub}
+            </span>
+          </span>
+        </button>
+        {l && (() => {
+          const { opcoes, valor } = opcoesDeStatus(colunas, l.colunaId);
+          return (
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ width: 180 }}>
+                <SelectStatus value={valor} opcoes={opcoes} onChange={id => move(l.id, id)}
+                  style={{ padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--bg)', fontSize: 12.5, color: 'var(--ink)' }} />
+              </span>
+              <ProximoContato quando={i.quando} onSalvar={iso => patchLead(l.id, { proximoContatoEm: iso })} />
+            </span>
+          );
+        })()}
+        {i.tipo === 'tarefa' && <button onClick={() => void toggleTarefa(i.id.slice(1), true)} style={{ border: 'none', background: 'none', fontSize: 11.5, color: 'var(--olive)', fontWeight: 600 }}>concluir</button>}
+      </div>
+    );
+  };
   const bloco = (titulo: string, lista: Item[], cor: string, comData = true) => (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden', marginBottom: 14 }}>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'visible', marginBottom: 14 }}>
       <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--line)', fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, color: cor }}>{titulo} ({lista.length})</p>
       {lista.map(i => linha(i, comData))}
       {lista.length === 0 && <p style={{ margin: 0, padding: '18px 14px', fontSize: 12.5, color: 'var(--muted)' }}>Nada aqui.</p>}
@@ -228,3 +258,27 @@ const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 
 const card: React.CSSProperties = { width: '100%', maxWidth: 440, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 22 };
 const lbl: React.CSSProperties = { display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', margin: '10px 0 5px' };
 const campo: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5, boxSizing: 'border-box' };
+
+/** Remarcar o próximo contato direto da lista: data + horário (mesma grade do card). */
+function ProximoContato({ quando, onSalvar }: { quando: string; onSalvar: (iso: string) => Promise<boolean> }) {
+  const d = new Date(quando);
+  const [data, setData] = useState(chave(d));
+  const [h, setH] = useState(String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'));
+  const [salvando, setSalvando] = useState(false);
+  useEffect(() => { const n = new Date(quando); setData(chave(n)); setH(String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0')); }, [quando]);
+  const mudou = data !== chave(d) || h !== String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const sel: React.CSSProperties = { padding: '7px 8px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--bg)', fontSize: 12.5, color: 'var(--ink)' };
+  const horas = HORARIOS.includes(h) ? HORARIOS : [h, ...HORARIOS];
+  return (
+    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="Próximo contato">
+      <input type="date" min={hojeLocal()} value={data} onChange={e => setData(e.target.value)} style={{ ...sel, width: 132 }} />
+      <select value={h} onChange={e => setH(e.target.value)} style={sel}>{horas.map(x => <option key={x} value={x}>{x}</option>)}</select>
+      {mudou && (
+        <button disabled={salvando || !data} onClick={async () => { setSalvando(true); await onSalvar(isoLocal(data, h)); setSalvando(false); }}
+          style={{ padding: '7px 11px', border: 'none', borderRadius: 7, background: 'var(--terra)', color: '#fff', fontSize: 12, fontWeight: 600 }}>
+          {salvando ? '…' : 'Salvar'}
+        </button>
+      )}
+    </span>
+  );
+}
