@@ -35,8 +35,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       .where(eq(imobiliarias.id, claims.imobiliariaId))
       .limit(1);
     if (!imob) return res.status(401).json({ error: 'Imobiliária não encontrada' });
-    const [perfil] = await db.select({ bloqueado: perfis.bloqueado }).from(perfis).where(eq(perfis.id, claims.sub)).limit(1);
+    const [perfil] = await db.select({ bloqueado: perfis.bloqueado, role: perfis.role }).from(perfis).where(eq(perfis.id, claims.sub)).limit(1);
     if (!perfil || perfil.bloqueado) return res.status(401).json({ error: 'Acesso bloqueado. Fale com o gerente ou dono.' });
+    // cargo vale o do banco (o dono pode trocar corretor ⇄ gerente com a sessão aberta; o token dura 30 dias)
+    req.auth = { ...claims, role: perfil.role as JwtClaims['role'] };
     if (imob.status !== 'ativa') {
       return res.status(403).json({
         error: 'ACESSO_SUSPENSO',

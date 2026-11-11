@@ -1,4 +1,4 @@
-import { perfilAtivo } from '../lib/remoteLeads';
+import { perfilAtivo, nomeNaLista } from '../lib/remoteLeads';
 import { useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -37,7 +37,9 @@ export function NewLeadModal() {
     if (ok) reset();
   };
 
-  const corretores = perfis.filter(p => p.role === 'corretor' && perfilAtivo(p));
+  // dono e gerente também atendem (têm carteira e WhatsApp próprios) — entram na lista
+  const ordemCargo: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
+  const corretores = perfis.filter(perfilAtivo).sort((a, b) => (ordemCargo[a.role] ?? 3) - (ordemCargo[b.role] ?? 3) || a.nome.localeCompare(b.nome));
 
   return (
     <div onClick={fechar} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>
@@ -74,7 +76,7 @@ export function NewLeadModal() {
               <label style={label}>Corretor</label>
               <select value={corretorId} onChange={e => setCorretorId(e.target.value)} style={input}>
                 <option value="">Sem atribuição</option>
-                {corretores.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                {corretores.map(p => <option key={p.id} value={p.id}>{nomeNaLista(p)}{p.role === 'gerente' ? ' (Gerente)' : ''}</option>)}
               </select>
             </div>
           )}

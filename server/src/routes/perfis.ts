@@ -97,24 +97,59 @@ export function perfisRouter(io: SocketServer) {
   const updateSchema = z.object({
     nome: z.string().min(2).optional(),
     telefone: z.string().nullable().optional(),
+    email: z.string().email().optional(),
+    role: z.enum(['gerente', 'corretor']).optional(),
     roletaIds: z.array(z.string().uuid()).optional(),
   });
 
   router.patch('/:id', requireRole('dono', 'gerente'), async (req, res) => {
     const parsed = updateSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
+    if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos — confira nome e e-mail' });
     const { imobiliariaId, role } = req.auth!;
 
     const [alvo] = await db.select().from(perfis).where(and(eq(perfis.id, req.params.id), eq(perfis.imobiliariaId, imobiliariaId))).limit(1);
     if (!alvo) return res.status(404).json({ error: 'Perfil não encontrado' });
     if (role === 'gerente' && alvo.role !== 'corretor') return res.status(403).json({ error: 'Gerente só edita corretores' });
 
-    const { roletaIds, ...campos } = parsed.data;
-    const [row] = Object.keys(campos).length
-      ? await db.update(perfis).set(campos).where(eq(perfis.id, alvo.id)).returning()
+    const { roletaIds, email: emailNovo, role: cargoNovo, ...campos } = parsed.data;
+    const set: Partial<typeof perfis.$inferInsert> = { ...campos };
+
+    // e-mail de acesso: único no sistema todo
+    if (emailNovo && emailNovo.toLowerCase() !== alvo.email) {
+      const email = emailNovo.toLowerCase();
+      const [existe] = await db.select({ id: perfis.id }).from(perfis).where(eq(perfis.email, email)).limit(1);
+      if (existe) return res.status(409).json({ error: 'Já existe um perfil com esse e-mail' });
+      set.email = email;
+    }
+
+    // cargo: só o dono troca (corretor ⇄ gerente); o perfil do dono não muda de cargo
+    const trocouCargo = !!cargoNovo && cargoNovo !== alvo.role;
+    if (trocouCargo) {
+      if (role !== 'dono') return res.status(403).json({ error: 'Só o dono pode mudar o cargo' });
+      if (alvo.role === 'dono') return res.status(400).json({ error: 'O cargo do dono não pode ser alterado' });
+      if (cargoNovo === 'corretor') {
+        const [imob] = await db.select({ limite: imobiliarias.limiteCorretores }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
+        const limite = imob?.limite ?? 0;
+        if (limite > 0) {
+          const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(perfis)
+            .where(and(eq(perfis.imobiliariaId, imobiliariaId), eq(perfis.role, 'corretor')));
+          if (n >= limite) return res.status(403).json({ error: `Limite de ${limite} corretores atingido. Fale com o suporte da Hinode Imóveis para ampliar o plano.` });
+        }
+      }
+      set.role = cargoNovo;
+    }
+
+    const [row] = Object.keys(set).length
+      ? await db.update(perfis).set(set).where(eq(perfis.id, alvo.id)).returning()
       : [alvo];
-    if (roletaIds && alvo.role === 'corretor') {
+    const cargoFinal = row.role;
+    if (roletaIds && cargoFinal === 'corretor') {
       await sincronizarRoletas(imobiliariaId, alvo.id, roletaIds);
+      io.to('imobiliaria:' + imobiliariaId).emit('roletas:mudou', {});
+    } else if (trocouCargo && cargoFinal === 'corretor') {
+      // virou corretor sem escolher roleta: entra na padrão (igual ao convite)
+      const [jaTem] = await db.select({ id: filasAtendimento.id }).from(filasAtendimento).where(eq(filasAtendimento.corretorId, alvo.id)).limit(1);
+      if (!jaTem) await sincronizarRoletas(imobiliariaId, alvo.id, [await garantirRoletaPadrao(imobiliariaId)]);
       io.to('imobiliaria:' + imobiliariaId).emit('roletas:mudou', {});
     }
     const perfil = pluck(row);

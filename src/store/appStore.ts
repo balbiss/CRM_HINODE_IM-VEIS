@@ -3,7 +3,7 @@ import {
   type Role, type ColId, type Lead, type ChatMsg, type AnexoTipo,
 } from '../lib/data';
 import { apiFetch, quandoSessaoExpirar, type ApiError } from '../lib/api';
-import { isBusinessHoursOpen, HORARIO_ATENDIMENTO_PADRAO, type DiaAtendimento } from '../lib/schedule';
+import { isBusinessHoursOpen, expedienteRoletaAberto, HORARIO_ATENDIMENTO_PADRAO, type DiaAtendimento } from '../lib/schedule';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import { mapRemoteLead, slugToColunaId, type RemoteColuna, type RemotePerfil, type RemoteLead } from '../lib/remoteLeads';
 
@@ -428,7 +428,7 @@ interface AppState {
   revokeMember: (nome: string) => void;
   removeMember: (id: string, nome: string) => void;
   createMember: (input: { nome: string; email: string; telefone?: string; role: 'gerente' | 'corretor'; roletaIds?: string[] }) => Promise<boolean>;
-  updateMember: (id: string, patch: { nome?: string; telefone?: string; roletaIds?: string[] }) => Promise<boolean>;
+  updateMember: (id: string, patch: { nome?: string; telefone?: string; email?: string; role?: 'gerente' | 'corretor'; roletaIds?: string[] }) => Promise<boolean>;
 
   setFaqOpen: (id: string | null) => void;
   toggleNotifMenu: () => void;
@@ -723,7 +723,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(s => (s.perfisRemotos.some(p => p.id === row.id) ? s : { perfisRemotos: [...s.perfisRemotos, row] }));
     });
     socket.off('perfil:atualizado').on('perfil:atualizado', (row: RemotePerfil) => {
-      set(s => ({ perfisRemotos: s.perfisRemotos.map(p => (p.id === row.id ? row : p)) }));
+      set(s => ({
+        perfisRemotos: s.perfisRemotos.map(p => (p.id === row.id ? { ...p, ...row } : p)),
+        // o dono mudou o MEU cargo (corretor ⇄ gerente): a tela já se ajusta sem precisar sair e entrar
+        ...(s.me && s.me.id === row.id && s.me.role !== row.role ? { me: { ...s.me, role: row.role as AuthUser['role'] } } : {}),
+      }));
     });
     socket.off('perfil:removido').on('perfil:removido', (msg: { id: string }) => {
       set(s => ({ perfisRemotos: s.perfisRemotos.filter(p => p.id !== msg.id), fila: s.fila.filter(f => f.corretorId !== msg.id) }));
@@ -1486,18 +1490,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (e) { get().toast((e as ApiError).message || 'Não foi possível desconectar'); }
   },
   enforceHorarioComercial: meNome => {
-    if (isBusinessHoursOpen(get().horarioAtendimento)) return;
+    // Quem desliga a roleta no fim do expediente é o SERVIDOR (avisa todo mundo pelo tempo real).
+    // Aqui só ajusta a tela, e pela MESMA regra dele (expediente da roleta, não o horário de
+    // atendimento da equipe). Antes o navegador usava o horário de atendimento e ainda mandava
+    // um "alternar" pro servidor — quem o dono ligava caía na hora (pedido do dono 11-11).
+    if (expedienteRoletaAberto()) return;
     // quem o dono colocou online fora do expediente continua (o servidor desliga quando vencer)
     const liberados = new Set(get().roletas.flatMap(r => r.membros.filter(m => m.liberadoForaHorario).map(m => m.corretorId)));
     const me = get().fila.find(f => f.nome === meNome);
     const algumOnline = get().fila.some(f => f.ativo && !liberados.has(f.corretorId));
     if (!algumOnline) return;
     set(s => ({ fila: s.fila.map(f => (f.ativo && !liberados.has(f.corretorId) ? { ...f, ativo: false } : f)) }));
-    if (me?.ativo && !liberados.has(me.corretorId)) {
-      get().toast('Você saiu da roleta automaticamente — fim do expediente');
-      const token = get().token;
-      if (token) apiFetch('/api/filas/disponibilidade', token, { method: 'PATCH', body: JSON.stringify({ corretorId: me.corretorId }) }).catch(() => {});
-    }
+    if (me?.ativo && !liberados.has(me.corretorId)) get().toast('Você saiu da roleta automaticamente — fim do expediente');
   },
 
   setBolsaoTab: t => set({ bolsaoTab: t }),
@@ -2110,10 +2114,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const row = await apiFetch<RemotePerfil>('/api/perfis/' + id, token, { method: 'PATCH', body: JSON.stringify(patch) });
       set(s => ({
-        perfisRemotos: s.perfisRemotos.map(p => (p.id === id ? row : p)),
+        perfisRemotos: s.perfisRemotos.map(p => (p.id === id ? { ...p, ...row } : p)),
         fila: s.fila.map(f => (f.corretorId === id ? { ...f, nome: row.nome } : f)),
       }));
-      if (patch.roletaIds) get().fetchRoletas();
+      if (patch.roletaIds || patch.role) { get().fetchRoletas(); void get().fetchKanbanData(); }
       get().toast(row.nome + ' atualizado');
       return true;
     } catch (e) {

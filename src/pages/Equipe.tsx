@@ -147,7 +147,7 @@ export default function Equipe() {
       )}
 
       {inviteOpen && <InviteModal isDono={isDono} onClose={() => setInviteOpen(false)} onSubmit={createMember} />}
-      {editing && <EditModal perfil={editing} onClose={() => setEditing(null)} onSubmit={updateMember} />}
+      {editing && <EditModal perfil={editing} isDono={isDono} onClose={() => setEditing(null)} onSubmit={updateMember} />}
       {senhaPara && <RedefinirSenhaModal perfil={senhaPara} onClose={() => setSenhaPara(null)} />}
     </div>
   );
@@ -218,20 +218,34 @@ function InviteModal({ isDono, onClose, onSubmit }: {
   );
 }
 
-function EditModal({ perfil, onClose, onSubmit }: {
+function EditModal({ perfil, isDono, onClose, onSubmit }: {
   perfil: RemotePerfil;
+  isDono: boolean;
   onClose: () => void;
-  onSubmit: (id: string, patch: { nome?: string; telefone?: string; roletaIds?: string[] }) => Promise<boolean>;
+  onSubmit: (id: string, patch: { nome?: string; telefone?: string; email?: string; role?: 'gerente' | 'corretor'; roletaIds?: string[] }) => Promise<boolean>;
 }) {
+  const roletasStore = useAppStore(s => s.roletas);
   const [nome, setNome] = useState(perfil.nome);
+  const [email, setEmail] = useState(perfil.email ?? '');
   const [telefone, setTelefone] = useState(perfil.telefone ?? '');
+  const [role, setRole] = useState<string>(perfil.role);
+  // virando corretor agora: já sugere a roleta padrão (igual ao convite)
   const [roletaIds, setRoletaIds] = useState<string[]>(perfil.roletaIds ?? []);
   const [saving, setSaving] = useState(false);
+  const podeTrocarCargo = isDono && perfil.role !== 'dono';
+  const trocarCargo = (v: string) => {
+    setRole(v);
+    if (v === 'corretor' && perfil.role !== 'corretor' && !roletaIds.length) setRoletaIds(roletasStore.filter(r => r.padrao).map(r => r.id));
+  };
 
   const submit = async () => {
-    if (!nome.trim()) return;
+    if (!nome.trim() || !email.trim()) return;
     setSaving(true);
-    const ok = await onSubmit(perfil.id, { nome: nome.trim(), telefone: telefone.trim(), ...(perfil.role === 'corretor' ? { roletaIds } : {}) });
+    const ok = await onSubmit(perfil.id, {
+      nome: nome.trim(), telefone: telefone.trim(), email: email.trim(),
+      ...(podeTrocarCargo && role !== perfil.role ? { role: role as 'gerente' | 'corretor' } : {}),
+      ...(role === 'corretor' ? { roletaIds } : {}),
+    });
     setSaving(false);
     if (ok) onClose();
   };
@@ -242,9 +256,20 @@ function EditModal({ perfil, onClose, onSubmit }: {
         <h3 style={{ fontFamily: 'Newsreader,serif', fontWeight: 400, fontSize: 22, margin: '0 0 18px' }}>Editar {perfil.nome}</h3>
         <label style={fieldLabel}>Nome</label>
         <input value={nome} onChange={e => setNome(e.target.value)} style={fieldInput} />
+        <label style={fieldLabel}>E-mail (login)</label>
+        <input value={email} onChange={e => setEmail(e.target.value)} style={fieldInput} type="email" placeholder="email@exemplo.com" />
         <label style={fieldLabel}>Telefone</label>
-        <input value={telefone} onChange={e => setTelefone(e.target.value)} style={{ ...fieldInput, marginBottom: 16 }} placeholder="(11) 90000-0000" />
-        {perfil.role === 'corretor' && <RoletaPicker ids={roletaIds} onChange={setRoletaIds} />}
+        <input value={telefone} onChange={e => setTelefone(e.target.value)} style={fieldInput} placeholder="(11) 90000-0000" />
+        <label style={fieldLabel}>Cargo</label>
+        {podeTrocarCargo ? (
+          <select value={role} onChange={e => trocarCargo(e.target.value)} style={fieldInput}>
+            <option value="corretor">Corretor</option>
+            <option value="gerente">Gerente</option>
+          </select>
+        ) : (
+          <p style={{ fontSize: 13, margin: '0 0 16px' }}>{roleLabel[perfil.role as AuthUser['role']] ?? perfil.role}{perfil.role !== 'dono' && !isDono ? <span style={{ color: 'var(--muted)', fontSize: 12 }}> · só o dono muda o cargo</span> : null}</p>
+        )}
+        {role === 'corretor' && <RoletaPicker ids={roletaIds} onChange={setRoletaIds} />}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13, fontWeight: 600 }}>Cancelar</button>
           <button onClick={submit} disabled={saving} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: saving ? 0.6 : 1 }}>{saving ? 'Salvando…' : 'Salvar'}</button>

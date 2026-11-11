@@ -106,10 +106,15 @@ export default function Followup() {
 
   useEffect(() => { fetchFollowup(); }, [fetchFollowup]);
 
-  const corretores = useMemo(() => perfis.filter(p => p.role === 'corretor'), [perfis]);
+  // dono e gerente também têm carteira e WhatsApp próprios: aparecem na lista e podem ter fluxos
+  const corretores = useMemo(() => {
+    const ordem: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
+    return perfis.filter(p => !p.bloqueado && !p.removidoEm).sort((a, b) => (ordem[a.role] ?? 3) - (ordem[b.role] ?? 3) || a.nome.localeCompare(b.nome));
+  }, [perfis]);
   const [aba, setAba] = useState<'fluxos' | 'andamento'>('fluxos');
   const [corretorSel, setCorretorSel] = useState<string>('');
-  const meId = perfis.find(p => p.nome === meNome)?.id;
+  const meIdStore = useAppStore(s => s.me?.id);
+  const meId = meIdStore ?? perfis.find(p => p.nome === meNome)?.id;
   const corretorAtivo = isManager ? corretorSel : (meId ?? '');
 
   // corretor vê os dele + os modelos da imobiliária (sem dono), que ele copia com "Usar como base"
@@ -168,7 +173,8 @@ export default function Followup() {
 
   async function criar() {
     if (!novoNome.trim()) return;
-    const alvo = isManager ? (corretorAtivo || undefined) : meId;
+    // gestor sem corretor escolhido ("Todos"): o fluxo fica no nome dele mesmo
+    const alvo = isManager ? (corretorAtivo || meId || undefined) : meId;
     const f = await criarFluxo(novoNome.trim(), alvo);
     setNovoNome('');
     if (f) setFluxoIdSel(f.id);
@@ -244,7 +250,7 @@ export default function Followup() {
                   <label style={fieldLabel}>Corretor</label>
                   <select value={corretorAtivo} onChange={e => { setCorretorSel(e.target.value); setFluxoIdSel(null); }} style={{ ...inp, marginBottom: 12 }}>
                     <option value="">Todos</option>
-                    {corretores.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    {corretores.map(c => <option key={c.id} value={c.id}>{c.id === meId ? c.nome + ' (eu)' : c.nome}{c.role === 'dono' ? ' (Dono)' : c.role === 'gerente' ? ' (Gerente)' : ''}</option>)}
                   </select>
                 </>
               )}
@@ -266,8 +272,8 @@ export default function Followup() {
               </div>
               <label style={fieldLabel}>Novo fluxo</label>
               <input value={novoNome} onChange={e => setNovoNome(e.target.value)} onKeyDown={e => e.key === 'Enter' && criar()} placeholder="Ex: Boas-vindas" style={{ ...inp, marginBottom: 8 }} />
-              <button onClick={criar} disabled={isManager && !corretorAtivo} style={{ width: '100%', padding: '9px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600, opacity: isManager && !corretorAtivo ? 0.5 : 1 }}>+ Criar fluxo</button>
-              {isManager && !corretorAtivo && <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 0' }}>Escolha um corretor pra criar.</p>}
+              <button onClick={criar} style={{ width: '100%', padding: '9px', border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600 }}>+ Criar fluxo</button>
+              {isManager && !corretorAtivo && <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 0' }}>Sem escolher alguém acima, o fluxo fica no seu nome.</p>}
               <button onClick={() => { setVerArquivados(v => !v); void fetchArquivados(); }} style={{ marginTop: 12, width: '100%', padding: '7px', border: 'none', background: 'none', fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                 <Archive size={12} /> {verArquivados ? 'Esconder arquivados' : 'Ver arquivados'}
               </button>

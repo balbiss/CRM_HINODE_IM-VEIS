@@ -27,6 +27,16 @@ export function isBusinessHoursOpen(dias: DiaAtendimento[] = HORARIO_ATENDIMENTO
   return min >= hoje.abreMin && min < hoje.fechaMin;
 }
 
+/** Expediente da ROLETA (mesma regra do servidor, roletaOka.ts): seg–sex até 18:20, quinta até 19:30,
+ *  sábado até 15:20, domingo fechado. É diferente do horário de atendimento da equipe (Ajustes). */
+export function expedienteRoletaAberto(agora = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(agora).map(x => [x.type, x.value]));
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
+  if (dow === 0) return false;
+  const min = (Number(p.hour) % 24) * 60 + Number(p.minute);
+  return min < (dow === 4 ? 19 * 60 + 30 : dow === 6 ? 15 * 60 + 20 : 18 * 60 + 20);
+}
+
 export function horarioAtendimentoLabel(dias: DiaAtendimento[] = HORARIO_ATENDIMENTO_PADRAO): string {
   const cfg = dias.length === 7 ? dias : HORARIO_ATENDIMENTO_PADRAO;
   const partes = cfg
