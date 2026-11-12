@@ -433,3 +433,28 @@ Também: funil completo dos Relatórios redesenhado (só etapas com lead em linh
   hora usa a próxima ocorrência dela. `escolherLote` deixa passar fora das levas quando o passo tem hora.
 - Editor: select "Horário" em cada passo (`HORAS_ENVIO`), `atrasoTexto` vira ex. "1 dia depois às 10:30". OBS do
   {criativo} explica que pode ir em qualquer passo.
+
+## 2026-11-11 — Conector do Claude (MCP) pro dono/gerente
+
+Pedido do dono (plano Claude Pro): consultar o CRM conversando, pelo Claude Code ou claude.ai. Port do conector da v1
+(`server/src/routes/mcp.js` do CRM OKA), adaptado pra v2.
+
+- **Onde:** `server/src/routes/mcp.ts`, montado na raiz do backend (`app.use(mcpRouter)` em `index.ts`). Domínio próprio
+  (`MCP_PUBLIC_URL`, padrão `https://mcp-v2.inoovaweb.cloud`) roteado pelo Traefik direto pro backend (todas as rotas):
+  `/mcp`, `/oauth/register|authorize|token`, `/.well-known/oauth-protected-resource[/mcp]`,
+  `/.well-known/oauth-authorization-server`. DNS com hífen: subdomínio com "_" não ganha certificado.
+- **Login:** OAuth 2.1 próprio (registro dinâmico RFC 7591, PKCE S256 obrigatório, access 1h, refresh 30 dias que troca a
+  cada uso). Tela de login valida e-mail/senha do CRM com bcrypt (igual `/api/auth/login`), 8 erros por IP+e-mail a cada
+  15 min = bloqueio temporário. Só **dono/gerente**, não bloqueado, não removido, imobiliária ativa — reconferido em TODA
+  chamada (`perfilLiberado`), então bloquear em Equipe corta na hora. Tabelas `mcp_oauth_clientes/codigos/tokens`
+  (migration 0058), tokens guardados só como sha256. Revogar tudo de alguém: `update mcp_oauth_tokens set revogado_em = now()
+  where perfil_id = ...`.
+- **8 ferramentas, só leitura:** resumo_do_periodo, desempenho_dos_corretores, campanhas, follow_up_automatico,
+  carteira_atual, buscar_lead, aprovacoes_pendentes, agenda. As de relatório/aprovações/compromissos chamam por dentro
+  (`http://127.0.0.1:PORT`) as MESMAS rotas das telas (`/api/relatorios`, `/api/relatorios-oka`, `/api/aprovacoes`,
+  `/api/compromissos`) com um JWT de 2 min no nome de quem logou → números iguais à tela Relatórios. carteira_atual,
+  buscar_lead, fluxos de follow-up e visitas da agenda são SQL direto, sempre filtrado pela imobiliária do usuário.
+  Filtro opcional `corretor` (por nome, parcial).
+- **Teste:** `mcptest.mjs` (30 checagens: 401 sem token, metadados, registro, login errado, corretor barrado, PKCE,
+  code de uso único, initialize, 8 tools, refresh rotativo) — passou local (PGlite + seed).
+- Manual: item "Perguntar ao Claude sobre o CRM (conector MCP)".

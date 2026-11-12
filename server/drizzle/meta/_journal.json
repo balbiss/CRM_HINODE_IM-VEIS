@@ -407,6 +407,13 @@
       "when": 1794249184547,
       "tag": "0057_classy_ultragirl",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794449012251,
+      "tag": "0058_sloppy_scalphunter",
+      "breakpoints": true
     }
   ]
 }

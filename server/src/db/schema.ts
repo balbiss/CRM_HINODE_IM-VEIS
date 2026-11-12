@@ -970,3 +970,37 @@ export const assistenteMemorias = pgTable('assistente_memorias', {
 }, table => ({
   perfilIdx: index('assistente_memorias_perfil_idx').on(table.perfilId),
 }));
+
+// ---------- Conector do Claude (MCP) — login OAuth do dono/gerente (routes/mcp.ts) ----------
+/** Aplicativo que se registrou sozinho (claude.ai, Claude Code...) — RFC 7591. */
+export const mcpOauthClientes = pgTable('mcp_oauth_clientes', {
+  id: text('id').primaryKey(),
+  secretHash: text('secret_hash'),
+  redirectUris: text('redirect_uris').array().notNull(),
+  nome: text('nome'),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+});
+/** Código de uso único (10 min) entre a tela de login e o pedido de token (PKCE S256). */
+export const mcpOauthCodigos = pgTable('mcp_oauth_codigos', {
+  codigoHash: text('codigo_hash').primaryKey(),
+  clienteId: text('cliente_id').notNull().references(() => mcpOauthClientes.id, { onDelete: 'cascade' }),
+  perfilId: uuid('perfil_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  redirectUri: text('redirect_uri').notNull(),
+  codeChallenge: text('code_challenge').notNull(),
+  expiraEm: timestamp('expira_em', { withTimezone: true }).notNull(),
+  usadoEm: timestamp('usado_em', { withTimezone: true }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+});
+/** Tokens guardados só como hash: access (1h) e refresh (30 dias, troca a cada uso). */
+export const mcpOauthTokens = pgTable('mcp_oauth_tokens', {
+  tokenHash: text('token_hash').primaryKey(),
+  tipo: text('tipo').notNull(), // 'access' | 'refresh'
+  clienteId: text('cliente_id').notNull().references(() => mcpOauthClientes.id, { onDelete: 'cascade' }),
+  perfilId: uuid('perfil_id').notNull().references(() => perfis.id, { onDelete: 'cascade' }),
+  expiraEm: timestamp('expira_em', { withTimezone: true }).notNull(),
+  revogadoEm: timestamp('revogado_em', { withTimezone: true }),
+  ultimoUsoEm: timestamp('ultimo_uso_em', { withTimezone: true }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  perfilIdx: index('mcp_oauth_tokens_perfil_idx').on(table.perfilId),
+}));

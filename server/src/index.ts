@@ -58,6 +58,7 @@ import { importacoesRouter } from './routes/importacoes.js';
 import { agenteIaRouter } from './routes/agenteIa.js';
 import { facebookWebhookRouter } from './routes/facebookWebhook.js';
 import { verificarConexoesFacebook } from './lib/facebookSaude.js';
+import { mcpRouter } from './routes/mcp.js';
 
 const app = express();
 // O webhook do formulário de site é público (token na URL) e a página fica em domínio de
@@ -74,6 +75,9 @@ app.use(express.json({
 }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Conector do Claude (MCP + login OAuth) no domínio próprio (MCP_PUBLIC_URL) — ver routes/mcp.ts
+app.use(mcpRouter);
 
 app.use('/api/auth', authRouter);
 app.use('/api/templates', templatesRouter);
