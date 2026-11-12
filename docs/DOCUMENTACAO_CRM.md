@@ -458,3 +458,18 @@ Pedido do dono (plano Claude Pro): consultar o CRM conversando, pelo Claude Code
 - **Teste:** `mcptest.mjs` (30 checagens: 401 sem token, metadados, registro, login errado, corretor barrado, PKCE,
   code de uso único, initialize, 8 tools, refresh rotativo) — passou local (PGlite + seed).
 - Manual: item "Perguntar ao Claude sobre o CRM (conector MCP)".
+
+## 2026-11-12 — Lead com 2 telefones ("confirme o seu telefone")
+
+Dono: na v1 o card mostra os 2 números do formulário; na v2 só aparecia um. O formulário da Meta da Hinode tem a
+pergunta "confirme o seu telefone"; a v2 só reconhecia campos com nome padrão (phone_number/telefone/whatsapp) e
+mandava esse pro histórico ("Respostas do formulário: ...").
+- `lib/facebook.ts` `mapearCampos`: 2º campo com cara de telefone (nome com telefone/phone/celular/whats/contato/confirm
+  e valor só com 10–13 dígitos) vira `telefoneAlternativo` quando é número diferente do principal (`mesmoNumero`). Sem
+  telefone principal, ele vira o principal.
+- `criarLead` grava `telefoneAlternativo`; no recadastro, número novo que o card não tem vira alternativo (se vazio).
+  Rota n8n `/api/captacao/facebook` aceita `telefoneAlternativo`.
+- Migration 0059 (backfill): preenche o alternativo a partir do histórico "confirme o seu telefone: N" dos leads que já
+  entraram (6 de 53 em produção tinham número diferente).
+- Card (`LeadDetalhesOka`): botão "Trocar com o principal" abaixo do alternativo (troca os dois numa chamada só).
+- Mesmo dia, v1: o botão "Usar este" copiava o 2º número pro principal e o principal sumia; agora troca os dois.

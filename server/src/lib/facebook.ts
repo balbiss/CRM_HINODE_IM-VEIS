@@ -1,3 +1,4 @@
+import { mesmoNumero } from './telefone.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 
@@ -108,12 +109,19 @@ export function mapearCampos(fieldData: LeadFb['field_data'] = []) {
   const primeiro = achar('first_name'), ultimo = achar('last_name');
   const tel = achar('phone_number', 'phone', 'telefone', 'whatsapp');
   const email = achar('email', 'e-mail');
+  // 2º telefone do formulário (ex.: "confirme o seu telefone"): quando é DIFERENTE do principal, vira o
+  // telefone alternativo do lead (igual à v1) — o follow-up tenta ele se o principal não existir no WhatsApp
+  const ehTelefone = (s: string) => { const d = s.replace(/\D/g, ''); return d.length >= 10 && d.length <= 13 && !/[a-zA-Z]/.test(s); };
+  const tel2 = fieldData.find(f => f !== tel && /telefone|phone|celular|whats|contato|confirm/i.test(f.name) && ehTelefone(v(f)));
   const finalidade = fieldData.find(f => /interesse|finalidade|compr|alug|objetivo/i.test(f.name));
-  const usados = new Set([nomeCompleto, primeiro, ultimo, tel, email].filter(Boolean));
+  const telefone = tel ? v(tel) : (tel2 ? v(tel2) : '');
+  const alternativo = tel && tel2 && !mesmoNumero(v(tel), v(tel2)) ? v(tel2) : undefined;
+  const usados = new Set([nomeCompleto, primeiro, ultimo, tel, email, ...(alternativo || !tel ? [tel2] : [])].filter(Boolean));
   const extras = fieldData.filter(f => !usados.has(f) && v(f)).map(f => ({ pergunta: f.name.replace(/_/g, ' '), resposta: v(f) }));
   return {
     nome: (nomeCompleto ? v(nomeCompleto) : [primeiro, ultimo].filter(Boolean).map(f => v(f!)).join(' ')) || 'Lead do Facebook',
-    telefone: tel ? v(tel) : '',
+    telefone,
+    telefoneAlternativo: alternativo,
     email: email && /\S+@\S+\.\S+/.test(v(email)) ? v(email) : undefined,
     finalidade: finalidade ? v(finalidade) : undefined,
     extras,

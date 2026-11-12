@@ -35,7 +35,7 @@ async function imovelPelaCampanha(imobId: string, campanha: string): Promise<str
 }
 
 export async function criarLead(io: SocketServer, imobId: string, dados: {
-  nome: string; telefone: string; email?: string; mensagem?: string;
+  nome: string; telefone: string; telefoneAlternativo?: string; email?: string; mensagem?: string;
   imovelTitulo?: string; imovelId?: string; campanha?: string; canal: string;
   finalidade?: 'venda' | 'locacao' | null;
   fbLeadId?: string;
@@ -75,6 +75,7 @@ export async function criarLead(io: SocketServer, imobId: string, dados: {
     imobiliariaId: imobId,
     nome: dados.nome.trim(),
     telefone: dados.telefone.trim(),
+    telefoneAlternativo: dados.telefoneAlternativo && !mesmoNumero(dados.telefoneAlternativo, dados.telefone) ? dados.telefoneAlternativo.trim() : null,
     email: dados.email?.trim() || null,
     imovelInteresseId,
     imovelTitulo,
@@ -138,6 +139,10 @@ async function recadastrarLead(io: SocketServer, imobId: string, lead: LeadRow, 
 
   const patch: Partial<LeadRow> = { segundoCadastro: true, recadastroEm: new Date(), recadastroOrigem: dados.campanha ?? dados.canal };
   if (!lead.email && dados.email) patch.email = dados.email.trim();
+  // número novo do formulário que o card ainda não tem: guarda como alternativo (não perde nenhum dos dois)
+  for (const n of [dados.telefone, dados.telefoneAlternativo]) {
+    if (n && !patch.telefoneAlternativo && !lead.telefoneAlternativo && !mesmoNumero(n, lead.telefone)) patch.telefoneAlternativo = n.trim();
+  }
   if (dados.fbLeadId && !lead.fbLeadId) patch.fbLeadId = dados.fbLeadId;
   if (!lead.campanha && dados.campanha) patch.campanha = dados.campanha.trim();
   if (lead.importacaoPendente) patch.importacaoPendente = false;
@@ -231,6 +236,7 @@ export function captacaoRouter(io: SocketServer) {
     imobiliariaId: z.string().uuid().optional(),
     nome: z.string().min(1),
     telefone: z.string().min(8),
+    telefoneAlternativo: z.string().max(40).optional(),
     email: z.string().email().optional(),
     fotoUrl: z.string().url().optional(),
     imovelTitulo: z.string().optional(),
@@ -254,6 +260,7 @@ export function captacaoRouter(io: SocketServer) {
     const row = await criarLead(io, imob.id, {
       nome: parsed.data.nome,
       telefone: parsed.data.telefone,
+      telefoneAlternativo: parsed.data.telefoneAlternativo,
       email: parsed.data.email,
       mensagem: parsed.data.mensagem,
       imovelTitulo: parsed.data.imovelTitulo,

@@ -79,6 +79,7 @@ async function receberLead(io: SocketServer, conexao: typeof integracoesFacebook
     row = await criarLead(io, imobId, {
       nome: c.nome,
       telefone: c.telefone,
+      telefoneAlternativo: c.telefoneAlternativo,
       email: c.email,
       // nome do ANÚNCIO primeiro (igual à v1): é o que casa com o criativo da pasta do Drive e
       // separa os relatórios por anúncio; sem anúncio, o nome da campanha

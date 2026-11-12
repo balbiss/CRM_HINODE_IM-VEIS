@@ -95,7 +95,16 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
             <Campo rotulo="Nome completo" valor={L.nome} onSalvar={v => v.trim() && salvar('nome', v.trim(), L.nome)} />
             <Campo rotulo="Telefone / WhatsApp" valor={L.tel} onSalvar={v => v.trim().length >= 8 && salvar('telefone', v.trim(), L.tel)} />
             <Campo rotulo="E-mail" valor={L.email} onSalvar={v => salvar('email', v.trim() || undefined, L.email || undefined)} />
-            <Campo rotulo="Telefone alternativo" valor={L.telefoneAlternativo ?? ''} onSalvar={v => salvar('telefoneAlternativo', v.trim(), L.telefoneAlternativo)} />
+            <div>
+              <Campo rotulo="Telefone alternativo" valor={L.telefoneAlternativo ?? ''} onSalvar={v => salvar('telefoneAlternativo', v.trim(), L.telefoneAlternativo)} />
+              {/* 2º número do formulário ("confirme o seu telefone"): trocar NÃO apaga nenhum dos dois (na v1 o "Usar este" perdia o outro) */}
+              {L.telefoneAlternativo?.trim() && (
+                <button type="button" onClick={() => void patchLead(L.id, { telefone: L.telefoneAlternativo!.trim(), telefoneAlternativo: L.tel })}
+                  style={{ marginTop: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--terra)', fontWeight: 600 }}>
+                  ⇅ Trocar com o principal
+                </button>
+              )}
+            </div>
             <Campo rotulo="Data de nascimento" tipo="date" valor={L.dataNascimento ?? ''} onSalvar={v => salvar('dataNascimento', v, L.dataNascimento)} />
           </div>
         </Bloco>
