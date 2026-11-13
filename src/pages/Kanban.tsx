@@ -29,6 +29,7 @@ export default function Kanban() {
   const perfis = useAppStore(s => s.perfisRemotos);
   const move = useAppStore(s => s.move);
   const openLead = useAppStore(s => s.openLead);
+  const registrarCadencia = useAppStore(s => s.registrarCadencia);
   const kbCorretor = useAppStore(s => s.kbCorretor);
   const setKbCorretor = useAppStore(s => s.setKbCorretor);
   const allTags = useAppStore(s => s.tags);
@@ -420,6 +421,17 @@ export default function Kanban() {
                               <span title={'Entrou no CRM em ' + dataHoraCompleta(l.criadoEm)} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
                                 <Clock size={11} strokeWidth={2} style={{ flex: 'none' }} />
                                 Entrou {dataHoraCurta(l.criadoEm)}
+                              </span>
+                            )}
+                            {/* dono 13/11: em TAREFAS e FOLLOW-UP o card mostra em qual chamada da cadência está, e dá pra
+                                registrar a chamada direto daqui (igual à v1) */}
+                            {(c.slug === 'atend' || c.slug === 'followup' || c.slug === 'followup_auto') && (
+                              <span onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} style={{ display: 'block', marginTop: 4 }}>
+                                <select value={l.cadenciaChamada ?? 0} title='Cadência de chamada — escolha pra registrar'
+                                  onChange={e => void registrarCadencia(l.id, Number(e.target.value))}
+                                  style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '2px 4px', borderRadius: 20, border: '1px solid rgba(37,99,235,.35)', background: 'rgba(37,99,235,.10)', color: '#1D4ED8', cursor: 'pointer' }}>
+                                  {[0, 1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n === 0 ? 'Início' : 'Chamada ' + n}</option>)}
+                                </select>
                               </span>
                             )}
                             {c.slug === 'credito' && !l.creditoAprovadoEm && (

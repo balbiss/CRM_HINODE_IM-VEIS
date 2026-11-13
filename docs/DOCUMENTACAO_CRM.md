@@ -488,3 +488,4 @@ mandava esse pro histórico ("Respostas do formulário: ...").
 - **Data das mensagens**: "Hoje/Ontem" contava períodos de 24h (`floor((agora - data)/24h)`) → mensagem de ontem 17h vista
   hoje 10h aparecia "Hoje". Novo `diasAtras()` em `lib/format.ts` conta dias de calendário (chat e lista de Conversas).
 - **Agenda**: busca por nome/telefone na aba Tarefas; Calendário só com visitas/FID e compromissos da equipe.
+- **Cadência no card do Kanban** (dono 13/11): em TAREFAS / FOLLOW-UP / FOLLOW-UP AUTOMÁTICO o card mostra um select-etiqueta "Chamada N" que chama `registrarCadencia` (POST /api/leads/:id/cadencia) sem abrir o card.
