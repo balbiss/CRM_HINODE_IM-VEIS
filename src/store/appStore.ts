@@ -3,6 +3,7 @@ import {
   type Role, type ColId, type Lead, type ChatMsg, type AnexoTipo,
 } from '../lib/data';
 import { apiFetch, quandoSessaoExpirar, type ApiError } from '../lib/api';
+import { diasAtras } from '../lib/format';
 import { isBusinessHoursOpen, expedienteRoletaAberto, HORARIO_ATENDIMENTO_PADRAO, type DiaAtendimento } from '../lib/schedule';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import { mapRemoteLead, slugToColunaId, type RemoteColuna, type RemotePerfil, type RemoteLead } from '../lib/remoteLeads';
@@ -105,7 +106,7 @@ export interface RemoteConversa {
 
 function mapRemoteMensagem(r: RemoteMensagem): ChatMsg {
   const dt = new Date(r.enviadoEm);
-  const off = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 86400000));
+  const off = diasAtras(dt);
   return {
     id: r.id, side: r.direcao, texto: r.texto ?? '', hora: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     bot: r.canal === 'followup', ia: r.canal === 'ia', off, anexoUrl: r.anexoUrl, anexoTipo: r.anexoTipo, anexoNome: r.anexoNome ?? undefined, ack: r.ackStatus ?? undefined, transcricao: r.transcricao ?? undefined,

@@ -393,19 +393,28 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
     if (ignorados.some(i => mesmoNumero(i.telefone, numero))) return;
   }
 
-  const candidatos = await db.select().from(leads).where(escopoLeads);
-  let lead = candidatos.find(l => mesmoNumero(l.telefone, numero));
+  // Igual à v1 (buscar_lead_por_telefone): o número é procurado na imobiliária INTEIRA. Primeiro um
+  // lead de quem conectou o WhatsApp; senão o lead que já existe com outro corretor, sem corretor ou
+  // descartado — a conversa entra NESSE card (dono 13/11: virava card duplicado "de WhatsApp" sem a
+  // campanha quando o lead era de outra pessoa ou estava no bolsão). Card novo só pra número que não existe.
+  const fim8 = soDigitos(numero).slice(-8);
+  const candidatos = fim8.length === 8
+    ? (await db.select().from(leads).where(and(eq(leads.imobiliariaId, sessao.imobiliariaId),
+        sql`right(regexp_replace(${leads.telefone}, '\\D', '', 'g'), 8) = ${fim8}`)))
+      .filter(l => mesmoNumero(l.telefone, numero))
+      .sort((a, b) => Number(!!a.descartadoEm) - Number(!!b.descartadoEm) || +(b.ultimaAcaoEm ?? b.criadoEm) - +(a.ultimaAcaoEm ?? a.criadoEm))
+    : [];
+  void escopoLeads;
+  let lead = (espelhoDeCorretor ? candidatos.find(l => l.corretorId === sessao.corretorId) : undefined) ?? candidatos[0];
 
-  // WhatsApp de corretor/gerente/dono: quem escreve já vira card na carteira de quem conectou o
-  // número, sem roleta — igual a campanha de WhatsApp da v1 (pedido do dono 11-03: "pra todos").
-  // A lista "Contatos novos" deixou de ser alimentada; número marcado como pessoal segue ignorado (acima).
-  if (!lead && espelhoDeCorretor && !fromMe) {
+  // WhatsApp de corretor/gerente/dono: quem escreve e não é lead de ninguém vira card na carteira de
+  // quem conectou o número, sem roleta — igual a campanha de WhatsApp da v1 (pedido do dono 11-03).
+  // Número marcado como pessoal segue ignorado (acima).
+  if (lead && espelhoDeCorretor && !fromMe && lead.corretorId !== sessao.corretorId) {
     // v1 "possível duplicidade": quem escreveu já é lead de OUTRO corretor (ou está sem dono / rebatida)
-    // → dono e gerente decidem se transferem. Um aviso por lead por dia.
-    const daImob = await db.select({ id: leads.id, nome: leads.nome, telefone: leads.telefone, corretorId: leads.corretorId })
-      .from(leads).where(eq(leads.imobiliariaId, sessao.imobiliariaId));
-    const outro = daImob.find(l => mesmoNumero(l.telefone, numero));
-    if (outro && !avisouDuplicidadeHoje(outro.id)) {
+    // → a conversa fica no card que já existe e dono e gerente decidem se transferem. Um aviso por lead por dia.
+    const outro = lead;
+    if (!avisouDuplicidadeHoje(outro.id)) {
       const [corr] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, sessao.corretorId!)).limit(1);
       const gestores = await db.select({ id: perfis.id }).from(perfis)
         .where(and(eq(perfis.imobiliariaId, sessao.imobiliariaId), inArray(perfis.role, ['dono', 'gerente']), eq(perfis.bloqueado, false)));
@@ -467,7 +476,9 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
   if (fromMe && lead.iaStatus === 'atendendo') void pausarIa(io, lead.id, 'alguém respondeu pelo celular');
 
   // Carimba por qual número o lead entrou (se ainda não tiver).
-  if (!lead.sessaoWhatsappId) {
+  // só "prende" o card no número quando o número é de quem cuida dele (a conversa pode ter chegado
+  // pelo WhatsApp de outro corretor e cair no card que já existia)
+  if (!lead.sessaoWhatsappId && (sessao.escopo !== 'corretor' || lead.corretorId === sessao.corretorId)) {
     await db.update(leads).set({ sessaoWhatsappId: sessao.id }).where(eq(leads.id, lead.id)).catch(() => {});
     lead = { ...lead, sessaoWhatsappId: sessao.id };
   }

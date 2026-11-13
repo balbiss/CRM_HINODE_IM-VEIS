@@ -10,7 +10,7 @@ import { useRoleInfo } from '../lib/selectors';
 import { mapMsgs, type Lead } from '../lib/data';
 import { Visto } from '../components/Visto';
 import { ChatAvatar } from '../components/ChatAvatar';
-import { canalPill, dayLabel } from '../lib/format';
+import { canalPill, dayLabel, diasAtras } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from '../components/AnexoMensagem';
@@ -159,7 +159,7 @@ export default function Conversas() {
               const legendaAnexo = resumo?.anexoTipo === 'imagem' ? 'Foto' : resumo?.anexoTipo === 'video' ? 'Vídeo' : resumo?.anexoTipo === 'documento' ? 'Documento' : resumo?.anexoTipo === 'audio' ? 'Áudio' : resumo?.texto;
               const dataMsg = resumo ? new Date(resumo.enviadoEm) : null;
               const horaMsg = dataMsg ? dataMsg.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-              const diasMsg = dataMsg ? Math.max(0, Math.floor((Date.now() - dataMsg.getTime()) / 86400000)) : 0;
+              const diasMsg = dataMsg ? diasAtras(dataMsg) : 0;
               const on = convId === l.id;
               return (
                 <button

@@ -473,3 +473,18 @@ mandava esse pro histórico ("Respostas do formulário: ...").
   entraram (6 de 53 em produção tinham número diferente).
 - Card (`LeadDetalhesOka`): botão "Trocar com o principal" abaixo do alternativo (troca os dois numa chamada só).
 - Mesmo dia, v1: o botão "Usar este" copiava o 2º número pro principal e o principal sumia; agora troca os dois.
+
+## 2026-11-13 — Pedidos do dono no 1º dia da v2 oficial
+
+- **WhatsApp acha o lead na imobiliária inteira** (`routes/whatsapp.ts` `processarMensagem`): igual à v1
+  (`buscar_lead_por_telefone`). Busca por últimos 8 dígitos + `mesmoNumero`; prefere o lead de quem conectou o número,
+  senão o que já existe (ativo antes de descartado, mais recente). Lead de outra pessoa/sem corretor → a conversa entra
+  NESSE card + aviso "Possível duplicidade" pro dono/gerente. Antes criava card "de WhatsApp" duplicado sem campanha
+  (9 casos na 1ª noite: WhatsApp do Oka estava no perfil "Oka corretor" e os leads no "Oka" dono). `sessaoWhatsappId`
+  só é preso quando o número é de quem cuida do card.
+- **Higienização** (v1 `mensagens_select_por_papel` / `interacoes_select`): corretor só vê mensagens
+  (`GET /api/mensagens`, `/api/mensagens/:leadId`) e histórico (`GET /api/leads/:id/eventos`) a partir de
+  `coalesce(data_atribuicao, criado_em)`; no histórico, `criado` e `formulario` sempre aparecem. Dono/gerente veem tudo.
+- **Data das mensagens**: "Hoje/Ontem" contava períodos de 24h (`floor((agora - data)/24h)`) → mensagem de ontem 17h vista
+  hoje 10h aparecia "Hoje". Novo `diasAtras()` em `lib/format.ts` conta dias de calendário (chat e lista de Conversas).
+- **Agenda**: busca por nome/telefone na aba Tarefas; Calendário só com visitas/FID e compromissos da equipe.

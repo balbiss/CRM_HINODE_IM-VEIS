@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { notificar } from '../lib/notificar.js';
 import { avisarNovaPasta, avisarPendencia } from '../lib/credito.js';
-import { and, asc, eq, gte, isNull, lt, sql, getTableColumns } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lt, sql, getTableColumns, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, leadTags, mensagensWhatsapp, filasAtendimento, colunasKanban, eventosLead, perfis, tarefas, distribuicaoLog, recusasLead, imobiliarias, notificacoes, imoveis, descartesLeads } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -610,10 +610,15 @@ export function leadsRouter(io: SocketServer) {
     const scoped = role === 'corretor'
       ? and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
       : and(eq(leads.id, req.params.id), eq(leads.imobiliariaId, imobiliariaId));
-    const [lead] = await db.select({ id: leads.id }).from(leads).where(scoped).limit(1);
+    const [lead] = await db.select({ id: leads.id, desde: sql<Date>`coalesce(${leads.dataAtribuicao}, ${leads.criadoEm})` }).from(leads).where(scoped).limit(1);
     if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
+    // v1 "higienização" (dono 13/11): o corretor só vê o histórico de quando ELE recebeu o lead pra frente.
+    // Como o lead chegou e as respostas do formulário (renda, cidade...) continuam visíveis pra ele.
     const rows = await db.select().from(eventosLead)
-      .where(eq(eventosLead.leadId, lead.id)).orderBy(desc(eventosLead.criadoEm));
+      .where(and(eq(eventosLead.leadId, lead.id), role === 'corretor'
+        ? or(gte(eventosLead.criadoEm, new Date(lead.desde)), inArray(eventosLead.tipo, ['criado', 'formulario']))
+        : undefined))
+      .orderBy(desc(eventosLead.criadoEm));
     res.json(rows);
   });
 

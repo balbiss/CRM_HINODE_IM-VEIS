@@ -13,6 +13,13 @@ export const stripAccents = (s: string) => {
 
 export const ini = (n: string) => n.split(' ').map(p => p[0]).slice(0, 2).join('');
 
+/** Quantos dias de CALENDÁRIO (no fuso do aparelho) a data ficou pra trás: ontem 17h vista hoje 10h = 1.
+ *  (Antes contava períodos de 24h e mensagem de ontem aparecia como "Hoje" — Vitor 13/11.) */
+export const diasAtras = (d: Date, agora = new Date()) => {
+  const meiaNoite = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.max(0, Math.round((meiaNoite(agora) - meiaNoite(d)) / 86400000));
+};
+
 export const dayLabel = (off: number) => {
   if (off <= 0) return 'Hoje';
   if (off === 1) return 'Ontem';

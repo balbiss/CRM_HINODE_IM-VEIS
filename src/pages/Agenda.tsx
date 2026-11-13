@@ -9,8 +9,8 @@ import { SelectStatus } from '../components/SelectStatus';
 import { opcoesDeStatus } from '../lib/statusLista';
 
 /** Agenda (v1): todo lead com corretor tem um próximo contato. Aba Tarefas = Atrasadas / A fazer hoje /
- *  Futuras; Calendário com a agenda do dia (visitas/FID e compromissos da equipe primeiro, depois os
- *  contatos). Lead com o robô de follow-up rodando não aparece nas tarefas. */
+ *  Futuras; Calendário só com visitas/FID e compromissos da equipe (contatos e
+ *  tarefas ficam na aba Tarefas, que tem busca por nome/telefone). Lead com o robô de follow-up rodando não aparece nas tarefas. */
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const chave = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -43,6 +43,8 @@ export default function Agenda() {
 
   const [aba, setAba] = useState<'tarefas' | 'calendario'>('tarefas');
   const [filtroCorretor, setFiltroCorretor] = useState('');
+  // busca nas Tarefas por nome ou telefone (dono 13/11)
+  const [busca, setBusca] = useState('');
   const [ref, setRef] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [diaSel, setDiaSel] = useState(chave(new Date()));
   const [form, setForm] = useState<null | { id?: string; titulo: string; tipo: string; data: string; hora: string; local: string; observacao: string }>(null);
@@ -73,23 +75,31 @@ export default function Agenda() {
   }, [ativos, compromissos, tarefas, colFollow, colunas, isManager, filtroCorretor, me?.id]);
 
   const hoje = chave(new Date());
-  const contatos = itens.filter(i => i.tipo === 'contato' || i.tipo === 'tarefa');
+  const termo = busca.trim().toLowerCase();
+  const digitos = busca.replace(/[^0-9]/g, '');
+  const casaBusca = (i: Item) => !termo || [i.titulo, i.sub, i.lead?.nome].some(t => (t ?? '').toLowerCase().includes(termo))
+    || (digitos.length >= 3 && (i.lead?.tel ?? '').replace(/[^0-9]/g, '').includes(digitos));
+  const itensTarefas = itens.filter(casaBusca);
+  const contatos = itensTarefas.filter(i => i.tipo === 'contato' || i.tipo === 'tarefa');
   // contato/tarefa atrasa pelo HORÁRIO (não só pelo dia): marcado 10h e ninguém mexeu até 10h → Atrasadas
   const atrasadas = contatos.filter(i => +new Date(i.quando) < agora);
-  const deHoje = itens.filter(i => chave(new Date(i.quando)) === hoje && !atrasadas.includes(i));
-  const futuras = itens.filter(i => chave(new Date(i.quando)) > hoje).slice(0, 200);
+  const deHoje = itensTarefas.filter(i => chave(new Date(i.quando)) === hoje && !atrasadas.includes(i));
+  const futuras = itensTarefas.filter(i => chave(new Date(i.quando)) > hoje).slice(0, 200);
+  // Calendário: só visitas/FID marcadas nos leads e os compromissos da equipe — os contatos e tarefas
+  // ficam só na aba Tarefas (dono 13/11: o calendário ficava lotado de tarefas)
+  const itensCal = itens.filter(i => i.tipo === 'visita' || i.tipo === 'compromisso');
   const ordemDia = (a: Item, b: Item) => (a.tipo === 'visita' || a.tipo === 'compromisso' ? 0 : 1) - (b.tipo === 'visita' || b.tipo === 'compromisso' ? 0 : 1) || +new Date(a.quando) - +new Date(b.quando);
-  const doDia = itens.filter(i => chave(new Date(i.quando)) === diaSel).sort(ordemDia);
+  const doDia = itensCal.filter(i => chave(new Date(i.quando)) === diaSel).sort(ordemDia);
   const marcas = useMemo(() => {
     const m = new Map<string, { visita: boolean; comp: boolean; n: number }>();
-    for (const i of itens) {
+    for (const i of itensCal) {
       const k = chave(new Date(i.quando));
       const x = m.get(k) ?? { visita: false, comp: false, n: 0 };
       if (i.tipo === 'visita') x.visita = true; else if (i.tipo === 'compromisso') x.comp = true; else x.n++;
       m.set(k, x);
     }
     return m;
-  }, [itens]);
+  }, [itensCal]);
 
   const primeiroDia = new Date(ref.getFullYear(), ref.getMonth(), 1).getDay();
   const diasNoMes = new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
@@ -165,6 +175,8 @@ export default function Agenda() {
 
       {aba === 'tarefas' ? (
         <>
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder='Buscar por nome ou telefone…'
+            style={{ ...inp, width: '100%', maxWidth: 420, boxSizing: 'border-box', marginBottom: 14 }} />
           {bloco('Atrasadas', atrasadas, '#DC2626')}
           {bloco('A fazer hoje', deHoje.sort(ordemDia), 'var(--terra)', false)}
           {bloco('Futuras', futuras, 'var(--muted)')}

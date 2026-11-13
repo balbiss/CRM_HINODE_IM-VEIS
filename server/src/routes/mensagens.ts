@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { leads, mensagensWhatsapp } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -17,6 +17,9 @@ export async function carregarLeadAutorizado(leadId: string, imobiliariaId: stri
   return lead;
 }
 
+/** Mensagem a partir de quando o corretor atual recebeu o lead (v1: created_at >= data_atribuicao). */
+const desdeQuePegou = sql`${mensagensWhatsapp.enviadoEm} >= coalesce(${leads.dataAtribuicao}, ${leads.criadoEm})`;
+
 export function mensagensRouter(io: SocketServer) {
   const router = Router();
   router.use(requireAuth);
@@ -26,8 +29,9 @@ export function mensagensRouter(io: SocketServer) {
   // já que a maioria nunca trocou mensagem nenhuma pelo CRM ainda).
   router.get('/', async (req, res) => {
     const { imobiliariaId, role, sub } = req.auth!;
+    // corretor: só os leads dele e só as mensagens de quando ELE pegou o lead pra frente (v1 "higienização")
     const scoped = role === 'corretor'
-      ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub))
+      ? and(eq(leads.imobiliariaId, imobiliariaId), eq(leads.corretorId, sub), desdeQuePegou)
       : eq(leads.imobiliariaId, imobiliariaId);
 
     const rows = await db.select({
@@ -61,8 +65,11 @@ export function mensagensRouter(io: SocketServer) {
     const lead = await carregarLeadAutorizado(req.params.leadId, imobiliariaId, role, sub);
     if (lead === null) return res.status(404).json({ error: 'Lead não encontrado' });
     if (lead === undefined) return res.status(403).json({ error: 'Sem permissão para ver esta conversa' });
+    // v1 "higienização" (dono 13/11): o corretor não vê a conversa de quem teve o lead antes dele —
+    // só o que aconteceu desde que ele recebeu o lead. Dono e gerente veem tudo.
     const rows = await db.select().from(mensagensWhatsapp)
-      .where(eq(mensagensWhatsapp.leadId, req.params.leadId))
+      .where(and(eq(mensagensWhatsapp.leadId, req.params.leadId),
+        role === 'corretor' ? gte(mensagensWhatsapp.enviadoEm, lead.dataAtribuicao ?? lead.criadoEm) : undefined))
       .orderBy(asc(mensagensWhatsapp.enviadoEm));
 
     // abrir a conversa marca as recebidas como lidas (o assistente de voz só consulta: ?consulta=1)
