@@ -168,6 +168,9 @@ export async function reatribuirSlaVencido(io: SocketServer, agora = new Date())
     const [nomes] = await db.select({ nome: perfis.nome }).from(perfis).where(eq(perfis.id, proximo)).limit(1);
     registrarEvento(l.imobiliariaId, l.id, 'roleta', 'Sem atendimento em 5 min — passou para ' + (nomes?.nome ?? 'o próximo da fila'), 'Roleta');
     await notificar({ perfilId: proximo, leadId: l.id, tipo: 'lead_novo_atribuido', titulo: 'Novo lead recebido: ' + (l.nome || l.telefone) });
+    // v1: lead que muda de corretor liga o fluxo Geral do novo (a régua do anterior para antes)
+    const { encerrarPorLead, dispararGatilhoLeadNovo } = await import('./followup.js');
+    void encerrarPorLead(io, l.imobiliariaId, l.id, 'lead passou pra outro corretor').then(() => dispararGatilhoLeadNovo(io, l.imobiliariaId, l.id, proximo));
     io.to('imobiliaria:' + l.imobiliariaId).emit('lead:updated', row);
   }
 }

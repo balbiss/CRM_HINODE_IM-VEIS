@@ -585,6 +585,9 @@ export function leadsRouter(io: SocketServer) {
       await db.insert(distribuicaoLog).values({ imobiliariaId, leadId: row.id, corretorId: alvoId, origem: 'rebatida-puxada' });
       registrarEvento(imobiliariaId, row.id, 'roleta', 'Rebatida puxada do bolsão' + (alvoId === sub ? ' por ' + nome : ''), nome);
       io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
+      // v1 (trigger followup_disparo_automatico): lead que ganha corretor liga o fluxo Geral dele —
+      // inclusive rebatida puxada (Vitor 13/11: o geral não chamava o lead que vinha da rebatida)
+      void dispararGatilhoLeadNovo(io, imobiliariaId, row.id, alvoId);
     }
     if (!puxados.length) return res.status(404).json({ error: cidade ? 'Nenhuma rebatida disponível em ' + cidade + '.' : 'Nenhuma rebatida disponível no bolsão agora.', motivo: 'vazio' });
     res.json({ leads: puxados, lead: puxados[0], total: puxados.length, status: await statusRebatidas(imobiliariaId, alvoId) });

@@ -19,6 +19,15 @@ import type { Server as SocketServer } from 'socket.io';
 
 const soDigitos = (s: string) => (s || '').replace(/[^0-9]/g, '');
 
+/** Reinício automático de sessão travada ao abrir o QR: no máximo 1x a cada 20s por sessão. */
+const ultimoReinicio = new Map<string, number>();
+function podeReiniciar(sessionName: string) {
+  const agora = Date.now();
+  if (agora - (ultimoReinicio.get(sessionName) ?? 0) < 20000) return false;
+  ultimoReinicio.set(sessionName, agora);
+  return true;
+}
+
 /** 5591982935558 -> (91) 98293-5558 ; formata BR quando dá, senão devolve o número cru. */
 export function formatarTelefone(num: string): string {
   const d = soDigitos(num);
@@ -308,7 +317,14 @@ export function whatsappRouter(io: SocketServer) {
     if (!row) return res.status(404).json({ error: 'Sessão não encontrada' });
     if (!donoDaSessao(req, row)) return res.status(403).json({ error: 'Sem acesso a essa sessão.' });
     await refrescar(row.sessionName, row.id).catch(() => {});
-    const [atual] = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, row.id)).limit(1);
+    let [atual] = await db.select().from(sessoesWhatsapp).where(eq(sessoesWhatsapp.id, row.id)).limit(1);
+    // Sessão parada/travada (FAILED/STOPPED no WAHA — ex.: o QR anterior expirou sem ninguém ler): o "Conectar"
+    // de quem já tinha sessão só abre esta janela, então reinicia daqui (no máx. 1x a cada 20s por sessão) —
+    // antes o QR ficava girando pra sempre (Bárbara/Melissa 13/11).
+    if (atual.status === 'desconectada' && !atual.oficialAtiva && wahaConfigurado() && podeReiniciar(row.sessionName)) {
+      await criarSessao(row.sessionName).catch(e => console.error('reiniciar sessão (QR):', (e as Error).message));
+      [atual] = await db.update(sessoesWhatsapp).set({ status: 'conectando' }).where(eq(sessoesWhatsapp.id, row.id)).returning();
+    }
     const qr = atual.status === 'conectada' ? null : await qrSessao(row.sessionName).catch(() => null);
     res.json({ status: atual.status, numero: atual.numero, qr });
   });
