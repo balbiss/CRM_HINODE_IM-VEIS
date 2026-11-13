@@ -38,8 +38,8 @@ export function NewLeadModal() {
   };
 
   // dono e gerente também atendem (têm carteira e WhatsApp próprios) — entram na lista
-  const ordemCargo: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
-  const corretores = perfis.filter(perfilAtivo).sort((a, b) => (ordemCargo[a.role] ?? 3) - (ordemCargo[b.role] ?? 3) || a.nome.localeCompare(b.nome));
+  // ordem alfabética (dono 13/11) — a lista da equipe já vem ordenada
+  const corretores = perfis.filter(perfilAtivo);
 
   return (
     <div onClick={fechar} className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}>

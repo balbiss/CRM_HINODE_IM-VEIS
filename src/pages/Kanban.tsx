@@ -541,7 +541,7 @@ export default function Kanban() {
             <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 5px' }}>Para quem</label>
             <select value={transf.alvo} onChange={e => setTransf({ ...transf, alvo: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }}>
               <option value="">Escolha…</option>
-              {perfis.filter(perfilAtivo).sort((a, b) => (a.role === b.role ? 0 : a.role === 'dono' ? -1 : b.role === 'dono' ? 1 : a.role === 'gerente' ? -1 : 1)).map(p => (
+              {perfis.filter(perfilAtivo).map(p => (
                 <option key={p.id} value={p.id}>{nomeNaLista(p)}{p.role === 'gerente' ? ' (Gerente)' : p.role === 'dono' ? ' (Dono)' : ''}</option>
               ))}
             </select>

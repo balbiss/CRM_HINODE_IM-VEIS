@@ -4,6 +4,9 @@ import {
 } from '../lib/data';
 import { apiFetch, quandoSessaoExpirar, type ApiError } from '../lib/api';
 import { diasAtras } from '../lib/format';
+
+/** Equipe sempre em ordem alfabética (dono 13/11: as listas de corretor vinham fora de ordem). */
+const alfa = <T extends { nome: string }>(arr: T[]): T[] => [...arr].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
 import { isBusinessHoursOpen, expedienteRoletaAberto, HORARIO_ATENDIMENTO_PADRAO, type DiaAtendimento } from '../lib/schedule';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import { mapRemoteLead, slugToColunaId, type RemoteColuna, type RemotePerfil, type RemoteLead } from '../lib/remoteLeads';
@@ -721,11 +724,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         .catch(() => {});
     });
     socket.off('perfil:criado').on('perfil:criado', (row: RemotePerfil) => {
-      set(s => (s.perfisRemotos.some(p => p.id === row.id) ? s : { perfisRemotos: [...s.perfisRemotos, row] }));
+      set(s => (s.perfisRemotos.some(p => p.id === row.id) ? s : { perfisRemotos: alfa([...s.perfisRemotos, row]) }));
     });
     socket.off('perfil:atualizado').on('perfil:atualizado', (row: RemotePerfil) => {
       set(s => ({
-        perfisRemotos: s.perfisRemotos.map(p => (p.id === row.id ? { ...p, ...row } : p)),
+        perfisRemotos: alfa(s.perfisRemotos.map(p => (p.id === row.id ? { ...p, ...row } : p))),
         // o dono mudou o MEU cargo (corretor ⇄ gerente): a tela já se ajusta sem precisar sair e entrar
         ...(s.me && s.me.id === row.id && s.me.role !== row.role ? { me: { ...s.me, role: row.role as AuthUser['role'] } } : {}),
       }));
@@ -828,7 +831,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const leads = leadsRaw.map(r => mapRemoteLead(r, colunas, perfis));
       const leadsCorretorIds = Object.fromEntries(leadsRaw.map(r => [r.id, r.corretorId]));
       const fila = filaRaw.map(f => ({ corretorId: f.corretorId, nome: f.nome, ativo: f.emPlantao }));
-      set({ colunasRemotas: colunas, perfisRemotos: perfis, leads, leadsCorretorIds, fila, tags: tagsRaw, kanbanLoading: false });
+      set({ colunasRemotas: colunas, perfisRemotos: alfa(perfis), leads, leadsCorretorIds, fila, tags: tagsRaw, kanbanLoading: false });
       if (get().me?.role !== 'corretor') void get().fetchAprovacoes();
       // 2ª etapa, em segundo plano: o arquivo (sem dono / descartados — milhares) completa Bolsão e REBATIDA
       if (get().me?.role !== 'corretor') {
@@ -2059,7 +2062,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       apiFetch<RemotePerfil>('/api/perfis/' + id + '/bloquear', token, { method: 'PATCH' })
         .then(row => {
           set(s => ({
-            perfisRemotos: s.perfisRemotos.map(p => (p.id === id ? row : p)),
+            perfisRemotos: alfa(s.perfisRemotos.map(p => (p.id === id ? row : p))),
             fila: s.fila.map(f => (f.corretorId === id ? { ...f, ativo: row.emPlantao } : f)),
           }));
           get().toast(row.nome + (row.bloqueado ? ' bloqueado (férias/afastado) — saiu da roleta' : ' desbloqueado'));
@@ -2103,7 +2106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // O próprio socket já pode ter adicionado esse perfil (o servidor emite antes de responder o POST) —
       // por isso os dois lados checam se o id já existe antes de inserir, pra não duplicar.
       set(s => ({
-        perfisRemotos: s.perfisRemotos.some(p => p.id === row.id) ? s.perfisRemotos : [...s.perfisRemotos, row],
+        perfisRemotos: s.perfisRemotos.some(p => p.id === row.id) ? s.perfisRemotos : alfa([...s.perfisRemotos, row]),
         fila: row.role === 'corretor' && !s.fila.some(f => f.corretorId === row.id) ? [...s.fila, { corretorId: row.id, nome: row.nome, ativo: false }] : s.fila,
       }));
       if (input.roletaIds?.length) get().fetchRoletas();
@@ -2120,7 +2123,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const row = await apiFetch<RemotePerfil>('/api/perfis/' + id, token, { method: 'PATCH', body: JSON.stringify(patch) });
       set(s => ({
-        perfisRemotos: s.perfisRemotos.map(p => (p.id === id ? { ...p, ...row } : p)),
+        perfisRemotos: alfa(s.perfisRemotos.map(p => (p.id === id ? { ...p, ...row } : p))),
         fila: s.fila.map(f => (f.corretorId === id ? { ...f, nome: row.nome } : f)),
       }));
       if (patch.roletaIds || patch.role) { get().fetchRoletas(); void get().fetchKanbanData(); }

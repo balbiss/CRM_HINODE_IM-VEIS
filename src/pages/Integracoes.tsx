@@ -648,11 +648,9 @@ function ConexaoWhatsapp({ modo }: { modo: ModoWhatsapp }) {
   const renomear = useAppStore(s => s.renomearSessaoWhatsapp);
   const me = useAppStore(s => s.me);
   // Dono e gerente também podem conectar o próprio WhatsApp (pedido do dono 11-03):
-  // ganham a mesma lista privada de "Contatos novos" em Conversas. Gestores primeiro.
-  const ordemRole: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
+  // ganham a mesma lista privada de "Contatos novos" em Conversas. Ordem alfabética (dono 13/11).
   const corretores = perfis
-    .filter(p => p.role === 'corretor' || p.role === 'gerente' || p.role === 'dono')
-    .sort((a, b) => (ordemRole[a.role] ?? 9) - (ordemRole[b.role] ?? 9));
+    .filter(p => p.role === 'corretor' || p.role === 'gerente' || p.role === 'dono');
   const nomeNaLista = (p: { id: string; nome: string; role: string }) =>
     p.nome + (p.role === 'dono' ? ' · Dono' : p.role === 'gerente' ? ' · Gerente' : '') + (p.id === me?.id ? ' (você)' : '');
   const centrais = sessoes.filter(s => s.escopo === 'central');

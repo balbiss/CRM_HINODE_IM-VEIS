@@ -108,8 +108,8 @@ export default function Followup() {
 
   // dono e gerente também têm carteira e WhatsApp próprios: aparecem na lista e podem ter fluxos
   const corretores = useMemo(() => {
-    const ordem: Record<string, number> = { dono: 0, gerente: 1, corretor: 2 };
-    return perfis.filter(p => !p.bloqueado && !p.removidoEm).sort((a, b) => (ordem[a.role] ?? 3) - (ordem[b.role] ?? 3) || a.nome.localeCompare(b.nome));
+    // ordem alfabética (dono 13/11) — a lista da equipe já vem ordenada
+    return perfis.filter(p => !p.bloqueado && !p.removidoEm);
   }, [perfis]);
   const [aba, setAba] = useState<'fluxos' | 'andamento'>('fluxos');
   const [corretorSel, setCorretorSel] = useState<string>('');
