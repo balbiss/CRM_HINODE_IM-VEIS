@@ -344,13 +344,35 @@ export function leadsRouter(io: SocketServer) {
 
   // Transferir (um ou vários) leads pra um corretor — só dono/gerente. Avisa o corretor.
   router.post('/transferir', requireRole('dono', 'gerente'), async (req, res) => {
-    const parsed = z.object({ leadIds: z.array(z.string().uuid()).min(1).max(500), corretorId: z.string().uuid() }).safeParse(req.body);
+    // modo 'manter' (Lista do Kanban, dono 13/11 — igual ao "Transferir para..." da v1): só troca o dono do
+    // lead; coluna, próximo contato e visita ficam como estão. Sem modo = regra de sempre (sem corretor →
+    // LEAD NOVO, com corretor → REBATIDA do novo, próximo contato agora) — Bolsão e card usam essa.
+    const parsed = z.object({
+      leadIds: z.array(z.string().uuid()).min(1).max(500), corretorId: z.string().uuid(),
+      modo: z.enum(['manter', 'rebatida']).optional(),
+    }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Escolha os leads e o corretor' });
     const { imobiliariaId, nome } = req.auth!;
     const [corretor] = await db.select({ id: perfis.id, nome: perfis.nome }).from(perfis)
       .where(and(eq(perfis.id, parsed.data.corretorId), eq(perfis.imobiliariaId, imobiliariaId), eq(perfis.bloqueado, false))).limit(1);
     if (!corretor) return res.status(404).json({ error: 'Corretor não encontrado' });
-    const rows = await distribuirLeads(imobiliariaId, parsed.data.leadIds, corretor.id, 'manual');
+    let rows: (typeof leads.$inferSelect)[];
+    if (parsed.data.modo === 'manter') {
+      const agora = new Date();
+      rows = await db.update(leads).set({
+        corretorId: corretor.id, dataAtribuicao: agora, ultimaAcaoEm: agora,
+        // todo lead com corretor tem próximo contato (v1); quem já tinha mantém o dele
+        proximoContatoEm: sql`coalesce(${leads.proximoContatoEm}, ${agora.toISOString()}::timestamptz)`,
+      }).where(and(eq(leads.imobiliariaId, imobiliariaId), inArray(leads.id, parsed.data.leadIds))).returning();
+      if (rows.length) {
+        await db.insert(distribuicaoLog).values(rows.map(r => ({ imobiliariaId, leadId: r.id, corretorId: corretor.id, origem: 'transferencia' })));
+        await notificar(rows.length <= 3
+          ? rows.map(r => ({ perfilId: corretor.id, leadId: r.id, tipo: 'lead_novo_atribuido', titulo: 'Lead transferido pra você: ' + (r.nome || r.telefone) }))
+          : [{ perfilId: corretor.id, leadId: rows[0].id, tipo: 'lead_novo_atribuido', titulo: rows.length + ' leads foram transferidos pra você', texto: 'Por ' + nome + ' — eles continuam na mesma etapa.' }]);
+      }
+    } else {
+      rows = await distribuirLeads(imobiliariaId, parsed.data.leadIds, corretor.id, 'manual');
+    }
     for (const r of rows) {
       registrarEvento(imobiliariaId, r.id, 'atribuicao', 'Transferido para ' + corretor.nome, nome);
       io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', r);

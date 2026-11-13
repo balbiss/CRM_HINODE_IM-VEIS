@@ -30,6 +30,10 @@ export default function Kanban() {
   const move = useAppStore(s => s.move);
   const openLead = useAppStore(s => s.openLead);
   const registrarCadencia = useAppStore(s => s.registrarCadencia);
+  const transferirLeads = useAppStore(s => s.transferirLeads);
+  // Lista: marcar vários (ou todos os filtrados) e transferir pra alguém — dono/gerente (dono 13/11, igual à v1)
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [transf, setTransf] = useState<null | { alvo: string; modo: 'manter' | 'rebatida'; enviando: boolean }>(null);
   const kbCorretor = useAppStore(s => s.kbCorretor);
   const setKbCorretor = useAppStore(s => s.setKbCorretor);
   const allTags = useAppStore(s => s.tags);
@@ -135,6 +139,15 @@ export default function Kanban() {
     if (q) base = base.filter(l => l.nome.toLowerCase().includes(q) || l.tel.includes(q));
     return base;
   }, [allLeads, isManager, kbCorretor, meNome, filterCanal, kbTag, query, kbPrazo, colunas]);
+  // trocou o filtro: lead marcado que saiu da tela deixa de estar marcado (não transfere o que não se vê)
+  useEffect(() => {
+    setSel(prev => {
+      if (!prev.size) return prev;
+      const ids = new Set(leads.map(l => l.id));
+      const n = new Set([...prev].filter(id => ids.has(id)));
+      return n.size === prev.size ? prev : n;
+    });
+  }, [leads]);
 
   const active = leads.filter(l => l.col !== 'rebatida');
   const countPorColuna = useMemo(() => {
@@ -267,7 +280,20 @@ export default function Kanban() {
 
       {view === 'lista' ? (
         <div style={{ border: '1px solid var(--line)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
+          {isManager && sel.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 20px', borderBottom: '1px solid var(--line)', background: 'var(--terraSoft)' }}>
+              <strong style={{ fontSize: 13 }}>{sel.size} selecionado{sel.size > 1 ? 's' : ''}</strong>
+              <button onClick={() => setTransf({ alvo: '', modo: 'manter', enviando: false })} style={{ padding: '7px 14px', border: 'none', borderRadius: 7, background: 'var(--terra)', color: '#fff', fontSize: 12.5, fontWeight: 600 }}>Transferir para...</button>
+              <button onClick={() => setSel(new Set())} style={{ padding: '7px 12px', border: '1px solid var(--line)', borderRadius: 7, background: 'var(--card)', fontSize: 12.5 }}>Limpar seleção</button>
+            </div>
+          )}
           <div className="data-table-head" style={{ display: 'flex', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--line)', fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+            {isManager && (
+              <input type="checkbox" title="Marcar todos os leads deste filtro" aria-label="Marcar todos"
+                checked={leads.length > 0 && leads.every(l => sel.has(l.id))}
+                onChange={e => setSel(e.target.checked ? new Set(leads.map(l => l.id)) : new Set())}
+                style={{ width: 16, height: 16, flex: 'none', margin: 0 }} />
+            )}
             <span style={{ flex: 1.6 }}>Lead / imóvel</span>
             <span style={{ width: 110 }}>Canal</span>
             {isManager && <span style={{ flex: 1 }}>Corretor</span>}
@@ -276,7 +302,12 @@ export default function Kanban() {
             <span style={{ width: 90 }}>Tempo</span>
           </div>
           {leads.slice(0, visivelLista).map(l => (
-            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div key={l.id} className="data-row" style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '13px 20px', borderBottom: '1px solid var(--line)', background: sel.has(l.id) ? 'var(--terraSoft)' : undefined }}>
+              {isManager && (
+                <input type="checkbox" aria-label={'Selecionar ' + l.nome} checked={sel.has(l.id)}
+                  onChange={e => setSel(prev => { const n = new Set(prev); if (e.target.checked) n.add(l.id); else n.delete(l.id); return n; })}
+                  style={{ width: 16, height: 16, flex: 'none', margin: 0 }} />
+              )}
               <button onClick={() => openLead(l.id)} style={{ flex: 1.6, minWidth: 0, display: 'flex', gap: 11, alignItems: 'center', background: 'none', border: 'none', textAlign: 'left', padding: 0 }}>
                 <ChatAvatar nome={l.nome} foto={l.foto} canal={l.canal} size={32} />
                 <span style={{ minWidth: 0 }}>
@@ -501,6 +532,39 @@ export default function Kanban() {
             )}
           </div>
         </>
+      )}
+      {transf && (
+        <div onClick={() => !transf.enviando && setTransf(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8,17,31,.5)', zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 440, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 22 }}>
+            <p style={{ fontFamily: 'Newsreader,serif', fontSize: 21, margin: '0 0 4px' }}>Transferir {sel.size} lead{sel.size > 1 ? 's' : ''}</p>
+            <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px' }}>A pessoa escolhida recebe o aviso. Fica registrado no histórico de cada card.</p>
+            <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 5px' }}>Para quem</label>
+            <select value={transf.alvo} onChange={e => setTransf({ ...transf, alvo: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13.5 }}>
+              <option value="">Escolha…</option>
+              {perfis.filter(perfilAtivo).sort((a, b) => (a.role === b.role ? 0 : a.role === 'dono' ? -1 : b.role === 'dono' ? 1 : a.role === 'gerente' ? -1 : 1)).map(p => (
+                <option key={p.id} value={p.id}>{nomeNaLista(p)}{p.role === 'gerente' ? ' (Gerente)' : p.role === 'dono' ? ' (Dono)' : ''}</option>
+              ))}
+            </select>
+            <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', margin: '14px 0 6px' }}>Como ficam os leads</label>
+            {([['manter', 'Manter onde estão (recomendado)', 'Mesma coluna, mesmo próximo contato e visita — só muda o responsável.'],
+               ['rebatida', 'Recomeçar como Rebatida', 'Quem já tinha corretor vai pra REBATIDA do novo, com próximo contato agora; visita marcada é desfeita.']] as const).map(([v, t, d]) => (
+              <label key={v} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '8px 10px', border: '1px solid ' + (transf.modo === v ? 'var(--terra)' : 'var(--line)'), borderRadius: 8, marginBottom: 6, cursor: 'pointer' }}>
+                <input type="radio" checked={transf.modo === v} onChange={() => setTransf({ ...transf, modo: v })} style={{ marginTop: 3 }} />
+                <span><span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{t}</span><span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>{d}</span></span>
+              </label>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button disabled={!transf.alvo || transf.enviando} onClick={async () => {
+                setTransf({ ...transf, enviando: true });
+                const ok = await transferirLeads([...sel], transf.alvo, transf.modo);
+                if (ok) { setSel(new Set()); setTransf(null); } else setTransf({ ...transf, enviando: false });
+              }} style={{ flex: 1, padding: 11, border: 'none', borderRadius: 8, background: 'var(--terra)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: transf.alvo && !transf.enviando ? 1 : 0.5 }}>
+                {transf.enviando ? 'Transferindo…' : 'Transferir'}
+              </button>
+              <button disabled={transf.enviando} onClick={() => setTransf(null)} style={{ padding: '11px 16px', border: '1px solid var(--line)', borderRadius: 8, background: 'none', fontSize: 13 }}>Cancelar</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

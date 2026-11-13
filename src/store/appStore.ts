@@ -385,7 +385,7 @@ interface AppState {
   descartarLead: (leadId: string, motivo: string, observacao: string) => Promise<boolean>;
   registrarVenda: (leadId: string, dados: { valor: number; dataVenda: string; empreendimento?: string; unidade?: string; torre?: string; observacao?: string }) => Promise<boolean>;
   removerCompromisso: (leadId: string) => Promise<void>;
-  transferirLeads: (leadIds: string[], corretorId: string) => Promise<boolean>;
+  transferirLeads: (leadIds: string[], corretorId: string, modo?: 'manter' | 'rebatida') => Promise<boolean>;
   fetchAprovacoes: () => Promise<void>;
   decidirAprovacao: (leadId: string, tipo: 'descarte' | 'venda', decisao: 'aprovar' | 'rejeitar') => Promise<void>;
 
@@ -1076,11 +1076,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().toast('Compromisso removido do card');
     } catch (e) { get().toast((e as ApiError).message || 'Não foi possível remover'); }
   },
-  transferirLeads: async (leadIds, corretorId) => {
+  transferirLeads: async (leadIds, corretorId, modo) => {
     const token = get().token;
     if (!token) return false;
     try {
-      const r = await apiFetch<{ total: number }>('/api/leads/transferir', token, { method: 'POST', body: JSON.stringify({ leadIds, corretorId }) });
+      // em lotes de 500 (limite da rota) — "marcar todos" na Lista pode passar disso
+      const r = { total: 0 };
+      for (let i = 0; i < leadIds.length; i += 500) {
+        const x = await apiFetch<{ total: number }>('/api/leads/transferir', token, { method: 'POST', body: JSON.stringify({ leadIds: leadIds.slice(i, i + 500), corretorId, ...(modo ? { modo } : {}) }) });
+        r.total += x.total;
+      }
       const nome = get().perfisRemotos.find(p => p.id === corretorId)?.nome ?? 'corretor';
       get().toast(r.total === 1 ? 'Lead transferido para ' + nome : r.total + ' leads transferidos para ' + nome);
       return true;
