@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, desc, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, eq, desc, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Server as SocketServer } from 'socket.io';
 import { db } from '../db/client.js';
 import { followupFluxos, followupPassos, followupExecucoes, leads, perfis, imobiliarias } from '../db/schema.js';
@@ -49,7 +49,12 @@ export function followupRouter(io: SocketServer) {
     const ps = await db.select().from(followupPassos)
       .where(inArray(followupPassos.fluxoId, fluxos.map(f => f.id)))
       .orderBy(asc(followupPassos.ordem));
-    return fluxos.map(f => ({ ...f, passos: ps.filter(p => p.fluxoId === f.id) }));
+    // quantos leads estão com a régua rodando/pausada em cada fluxo (aviso antes de excluir — dono 14/11)
+    const vivos = await db.select({ fluxoId: followupExecucoes.fluxoId, status: followupExecucoes.status, n: sql<number>`count(*)::int` })
+      .from(followupExecucoes).where(and(inArray(followupExecucoes.fluxoId, fluxos.map(f => f.id)), ne(followupExecucoes.status, 'encerrada')))
+      .groupBy(followupExecucoes.fluxoId, followupExecucoes.status);
+    const n = (id: string, st: string) => vivos.find(v => v.fluxoId === id && v.status === st)?.n ?? 0;
+    return fluxos.map(f => ({ ...f, passos: ps.filter(p => p.fluxoId === f.id), rodando: n(f.id, 'ativa'), pausados: n(f.id, 'pausada') }));
   }
 
   // Fluxos: corretor vê os dele + os modelos/campanhas da imobiliária (sem dono); dono/gerente veem
@@ -198,9 +203,11 @@ export function followupRouter(io: SocketServer) {
   // Última régua desse lead (mesmo encerrada): o card sugere "continuar do passo X" quando o
   // corretor religa o follow-up depois do cliente ter respondido.
   router.get('/execucoes/lead/:leadId/ultima', async (req, res) => {
-    const { imobiliariaId } = req.auth!;
+    const { imobiliariaId, role, sub } = req.auth!;
+    // corretor só vê a régua que foi DELE nesse lead (não a de quem teve o lead antes — v1 higienização, Bárbara 14/11)
     const [ex] = await db.select().from(followupExecucoes)
-      .where(and(eq(followupExecucoes.leadId, req.params.leadId), eq(followupExecucoes.imobiliariaId, imobiliariaId)))
+      .where(and(eq(followupExecucoes.leadId, req.params.leadId), eq(followupExecucoes.imobiliariaId, imobiliariaId),
+        role === 'corretor' ? eq(followupExecucoes.corretorId, sub) : undefined))
       .orderBy(desc(followupExecucoes.iniciadoEm)).limit(1);
     if (!ex) return res.json(null);
     // quantos passos saíram de verdade nessa régua (o passoAtual já aponta pro próximo)

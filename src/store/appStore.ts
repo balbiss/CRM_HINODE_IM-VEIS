@@ -145,6 +145,8 @@ export interface RemoteFluxo {
   aoEsgotar: 'nada' | 'descartar' | 'mover'; aoEsgotarColunaId: string | null;
   motivoDescarteEsgotar?: string; campanha?: string | null; arquivadoEm?: string | null; ativoNaV1?: boolean | null;
   passos: RemotePassoFluxo[];
+  /** leads com a régua rodando / pausada nesse fluxo (aviso antes de excluir) */
+  rodando?: number; pausados?: number;
 }
 export interface RemoteExecucao {
   id: string; leadId: string; leadNome: string; fluxoId: string; fluxoNome: string;

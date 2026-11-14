@@ -304,7 +304,7 @@ export default function Followup() {
                       {rasc.ativo ? 'Ativo' : 'Inativo'}
                     </button>
                     <button title="Arquivar (para de disparar, fica guardado)" onClick={() => ask('Arquivar "' + fluxo.nome + '"?', 'Sai da lista, para de disparar e deixa de ser o Geral. Os passos ficam guardados em "Ver arquivados".', 'Arquivar', () => { void atualizarFluxo(fluxo.id, { arquivado: true }); setFluxoIdSel(null); })} style={iconBtn}><Archive size={13} /></button>
-                    {isManager && <button title="Excluir de vez" onClick={() => ask('Excluir fluxo "' + fluxo.nome + '" de vez?', 'Os passos e o histórico de execuções somem. Pra só tirar de uso, prefira arquivar.', 'Excluir', () => { excluirFluxo(fluxo.id); setFluxoIdSel(null); })} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={13} /></button>}
+                    {isManager && <button title="Excluir de vez" onClick={() => ask('Excluir fluxo "' + fluxo.nome + '" de vez?', ((fluxo.rodando ?? 0) + (fluxo.pausados ?? 0) > 0 ? '⚠️ Esse fluxo tem ' + (fluxo.rodando ?? 0) + ' lead(s) com o follow-up RODANDO e ' + (fluxo.pausados ?? 0) + ' pausado(s): eles param na hora e somem junto. ' : '') + 'Os passos e o histórico de execuções somem. Pra só tirar de uso, prefira arquivar.', 'Excluir', () => { excluirFluxo(fluxo.id); setFluxoIdSel(null); })} style={{ ...iconBtn, color: 'var(--terra)' }}><Trash2 size={13} /></button>}
                   </div>
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 14 }}>

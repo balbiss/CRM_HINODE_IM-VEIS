@@ -63,13 +63,15 @@ export function janelaEnvio(venc: Date): Date {
   if (s.min <= HM(18)) return max(venc, emSp(s, 0, 16));
   return s.dow === 5 ? emSp(s, 3, 9, 30) : emSp(s, 1, 9, 30);
 }
-/** "Na próxima leva" a partir de quando a anterior saiu (v1 followup_proxima_leva). */
+/** "Na próxima leva" a partir de quando a anterior saiu (v1 followup_proxima_leva).
+ *  Dono 14/11: saiu na sexta à tarde → sábado 9h30 (a v1 pulava o sábado e ia pra segunda). Saiu no
+ *  sábado (só tem a leva da manhã) ou domingo → segunda 9h30. */
 export function proximaLeva(d = new Date()): Date {
   const s = sp(d);
   if (s.dow === 0) return emSp(s, 1, 9, 30);
   if (s.dow === 6) return emSp(s, 2, 9, 30);
   if (s.min < HM(13)) return emSp(s, 0, 16);
-  return s.dow === 5 ? emSp(s, 3, 9, 30) : emSp(s, 1, 9, 30);
+  return emSp(s, 1, 9, 30); // seg–qui → dia seguinte; sexta → sábado
 }
 /** Quando o passo vence (v1 followup_calc_proximo_envio). */
 export function calcProximoEnvio(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' | 'dataHoraFixa'>, inscritoEm: Date, agora = new Date()): Date {
@@ -484,8 +486,8 @@ async function enviarPasso(io: SocketServer, ex: Exec): Promise<boolean> {
   let anexoTipo = normalizarTipo(passo.anexoTipo ?? passo.tipo);
   let anexoNome = passo.anexoNome ?? null;
   if (!anexoUrl && pedeCriativo) {
-    const url = await criativoParaLead(ex.imobiliariaId, lead.campanha);
-    if (url) { anexoUrl = url; anexoTipo = 'imagem'; anexoNome = 'anuncio.jpg'; }
+    const cr = await criativoParaLead(ex.imobiliariaId, lead.campanha);
+    if (cr) { anexoUrl = cr.url; anexoTipo = cr.tipo; anexoNome = cr.tipo === 'video' ? 'anuncio.mp4' : 'anuncio.jpg'; }
   }
   if (!anexoUrl && pedeFoto && imovel?.imagens?.[0]) { anexoUrl = imovel.imagens[0]; anexoTipo = 'imagem'; anexoNome = 'foto-imovel.jpg'; }
   if (!anexoUrl) anexoTipo = null;

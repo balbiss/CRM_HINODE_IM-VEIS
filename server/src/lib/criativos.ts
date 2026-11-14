@@ -142,16 +142,40 @@ export async function imagemParaEnvio(id: string): Promise<string> {
   return uploadFile(key, Buffer.from(await r.arrayBuffer()), tipo);
 }
 
+/** O VÍDEO do criativo pra mandar no WhatsApp (Bárbara 14/11: ia só a capa, "um print"). Baixa do Drive
+ *  uma vez e guarda no MinIO. Até 60 MB; acima disso (ou se o Drive não entregar) quem chama manda a capa. */
+const VIDEO_MAX = 60 * 1024 * 1024;
+export async function videoParaEnvio(id: string): Promise<string> {
+  const key = `criativos/envio/${id}.mp4`;
+  if (await existeArquivo(key)) return urlPublica(key);
+  const r = await fetch(`https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`, {
+    redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (CRM Hinode; criativos)' },
+  });
+  const tipo = r.headers.get('content-type') || '';
+  const tam = Number(r.headers.get('content-length') || 0);
+  if (!r.ok || !(tipo.startsWith('video/') || tipo === 'application/octet-stream')) throw new Error('Drive não entregou o vídeo (' + r.status + ' ' + tipo + ')');
+  if (tam > VIDEO_MAX) throw new Error('vídeo grande demais (' + Math.round(tam / 1048576) + ' MB)');
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > VIDEO_MAX) throw new Error('vídeo grande demais');
+  return uploadFile(key, buf, tipo.startsWith('video/') ? tipo : 'video/mp4');
+}
+
 /** Criativo do anúncio de onde o lead veio, pronto pra enviar — null se não tiver pasta, se o
- *  nome não casar ou se o Drive falhar (quem chama segue só com o texto). */
-export async function criativoParaLead(imobiliariaId: string, campanha: string | null | undefined): Promise<string | null> {
+ *  nome não casar ou se o Drive falhar (quem chama segue só com o texto). Vídeo vai como vídeo. */
+export async function criativoParaLead(imobiliariaId: string, campanha: string | null | undefined): Promise<{ url: string; tipo: 'imagem' | 'video' } | null> {
   if (!campanha?.trim()) return null;
   try {
     const [im] = await db.select({ pasta: imobiliarias.criativosPastaUrl }).from(imobiliarias).where(eq(imobiliarias.id, imobiliariaId)).limit(1);
     if (!im?.pasta) return null;
     const achados = casarCriativos(campanha, await listarCriativos(im.pasta));
-    const escolhido = achados.find(a => a.tipo === 'imagem') || achados.find(a => a.tipo === 'video');
-    return escolhido ? await imagemParaEnvio(escolhido.id) : null;
+    // anúncio em vídeo: manda o vídeo (a capa só se o vídeo não der); senão a imagem
+    const video = achados.find(a => a.tipo === 'video');
+    if (video) {
+      try { return { url: await videoParaEnvio(video.id), tipo: 'video' }; }
+      catch (e) { console.error('criativo vídeo → vai a capa:', (e as Error).message); }
+    }
+    const escolhido = achados.find(a => a.tipo === 'imagem') || video;
+    return escolhido ? { url: await imagemParaEnvio(escolhido.id), tipo: 'imagem' } : null;
   } catch (e) {
     console.error('criativo p/ follow-up:', (e as Error).message);
     return null;
