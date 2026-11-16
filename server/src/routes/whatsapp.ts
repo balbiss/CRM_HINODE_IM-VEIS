@@ -416,8 +416,11 @@ export async function processarMensagem(io: SocketServer, sessao: typeof sessoes
   const fim8 = soDigitos(numero).slice(-8);
   const candidatos = fim8.length === 8
     ? (await db.select().from(leads).where(and(eq(leads.imobiliariaId, sessao.imobiliariaId),
-        sql`right(regexp_replace(${leads.telefone}, '\\D', '', 'g'), 8) = ${fim8}`)))
-      .filter(l => mesmoNumero(l.telefone, numero))
+        // dono 16/11: o lead do formulário tem 2 números; o follow-up saiu pelo alternativo e a resposta
+        // de lá virava card novo ("Doceria Das Gemeas" sem campanha). Procura nos DOIS telefones do lead.
+        sql`(right(regexp_replace(${leads.telefone}, '\\D', '', 'g'), 8) = ${fim8}
+          or right(regexp_replace(coalesce(${leads.telefoneAlternativo}, ''), '\\D', '', 'g'), 8) = ${fim8})`)))
+      .filter(l => mesmoNumero(l.telefone, numero) || mesmoNumero(l.telefoneAlternativo ?? '', numero))
       .sort((a, b) => Number(!!a.descartadoEm) - Number(!!b.descartadoEm) || +(b.ultimaAcaoEm ?? b.criadoEm) - +(a.ultimaAcaoEm ?? a.criadoEm))
     : [];
   void escopoLeads;

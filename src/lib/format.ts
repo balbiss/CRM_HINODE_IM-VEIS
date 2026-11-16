@@ -54,3 +54,14 @@ export function fmtTelefone(t: string | null | undefined): string {
   if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
   return t;
 }
+
+/** Busca de lead por nome OU telefone — principal e alternativo (dono 16/11: "quando pesquiso pelo
+ *  segundo número não localiza"). Número pode vir com ( ) - espaço ou +55. `q` já em minúsculas. */
+export function casaBuscaLead(l: { nome: string; tel: string; telefoneAlternativo?: string | null }, q: string): boolean {
+  if (!q) return true;
+  if ((l.nome || '').toLowerCase().includes(q)) return true;
+  let d = q.replace(/\D/g, '');
+  if (d.length < 3) return false;
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  return [l.tel, l.telefoneAlternativo].some(t => !!t && t.replace(/\D/g, '').includes(d));
+}

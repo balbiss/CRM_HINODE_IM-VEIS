@@ -114,9 +114,12 @@ async function acharLeadExistente(imobId: string, telefone: string, email?: stri
   if (digitos.length >= 8) {
     const candidatos = await db.select().from(leads).where(and(
       eq(leads.imobiliariaId, imobId),
-      sql`right(regexp_replace(${leads.telefone}, '\\D', '', 'g'), 8) = ${digitos.slice(-8)}`,
+      // também pelo telefone alternativo (dono 16/11: a mesma pessoa tinha 2 cards)
+      sql`(right(regexp_replace(${leads.telefone}, '\\D', '', 'g'), 8) = ${digitos.slice(-8)}
+        or right(regexp_replace(coalesce(${leads.telefoneAlternativo}, ''), '\\D', '', 'g'), 8) = ${digitos.slice(-8)})`,
     )).orderBy(desc(leads.criadoEm));
-    return candidatos.find(l => mesmoNumero(l.telefone, telefone)) ?? null;
+    return candidatos.find(l => mesmoNumero(l.telefone, telefone))
+      ?? candidatos.find(l => mesmoNumero(l.telefoneAlternativo ?? '', telefone)) ?? null;
   }
   const mail = email?.trim().toLowerCase();
   if (!mail) return null;

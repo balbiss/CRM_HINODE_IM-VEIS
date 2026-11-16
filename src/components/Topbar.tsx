@@ -4,7 +4,7 @@ import { Menu, Bell } from 'lucide-react';
 import { BotaoAssistente } from './assistente/BotaoAssistente';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo, scopeLeads } from '../lib/selectors';
-import { ini, canalPill } from '../lib/format';
+import { ini, canalPill, casaBuscaLead } from '../lib/format';
 import { css } from '../lib/css';
 import { LogoMark } from './Logo';
 
@@ -30,7 +30,7 @@ export function Topbar() {
 
   const q = query.trim().toLowerCase();
   const results = q
-    ? scopeLeads(allLeads, isManager, meNome).filter(l => l.nome.toLowerCase().includes(q) || l.tel.includes(q)).slice(0, 6)
+    ? scopeLeads(allLeads, isManager, meNome).filter(l => casaBuscaLead(l, q)).slice(0, 6)
     : [];
   const showResults = searchFocused && q.length > 0;
   const naoLidas = notificacoes.filter(n => !n.lida).length;

@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { MOTIVOS_DESCARTE_EXTREMO, type Lead } from '../lib/data';
 import { dataHoraCurta } from '../lib/datas';
+import { casaBuscaLead } from '../lib/format';
 import type { BolsaoTab } from '../store/appStore';
 
 /** Distribuição de Leads (v1): 6 abas pra dono/gerente; corretor usa o "+ Mais Rebatidas". */
@@ -50,7 +51,7 @@ export default function Bolsao() {
 
   const filtroTexto = (l: Lead) => {
     const q = query.trim().toLowerCase();
-    if (q && !(l.nome.toLowerCase().includes(q) || l.tel.includes(q) || l.corretor.toLowerCase().includes(q))) return false;
+    if (q && !(casaBuscaLead(l, q) || l.corretor.toLowerCase().includes(q))) return false;
     if (cidade && norm(l.bairroInteresse) !== norm(cidade)) return false;
     return true;
   };
@@ -118,7 +119,8 @@ export default function Bolsao() {
 
   const lista: Lead[] = bTab === 'roletalog' ? [] : abas[bTab];
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const corretores = perfis.filter(p => perfilAtivo(p) && p.role !== 'dono');
+  // dono 16/11: "Colocar OKA DONO aqui nessa lista" — dono também recebe lead encaminhado (servidor já aceitava)
+  const corretores = perfis.filter(p => perfilAtivo(p));
   const logVisivel = soRecusas ? roletaLog.filter(r => r.tipo === 'recusa') : roletaLog;
   const ORIGEM: Record<string, string> = { roleta: 'Roleta automática', automatico: 'Roleta (5 min sem contato)', manual: 'Transferido', 'rebatida-puxada': 'Puxou do bolsão', importacao: 'Planilha' };
 
@@ -161,7 +163,7 @@ export default function Bolsao() {
             if (alvo) ask('Encaminhar ' + sel.size + ' lead(s) para ' + alvo.nome + '?', 'Lead que nunca teve corretor chega como novo (com aviso); os outros caem na REBATIDA dele.', 'Encaminhar', async () => { if (await transferirLeads([...sel], alvo.id)) setSel(new Set()); });
           }} style={inp}>
             <option value="" disabled>Encaminhar para…</option>
-            {corretores.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            {corretores.map(p => <option key={p.id} value={p.id}>{p.nome}{p.role === 'dono' ? ' (dono)' : ''}</option>)}
           </select>
           <button onClick={() => setSel(new Set())} style={{ border: 'none', background: 'none', color: 'var(--muted)', fontSize: 12.5 }}>limpar</button>
         </div>

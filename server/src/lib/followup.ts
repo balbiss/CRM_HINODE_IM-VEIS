@@ -90,8 +90,26 @@ export function vencimentoComHora(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' 
   const s = sp(agora);
   let d = emSp(s, dias, h, m);
   if (+d <= +agora) d = emSp(s, dias + 1, h, m);
-  if (sp(d).dow === 0) d = new Date(+d + 86400000);
+  return ajustarFimDeSemana(d, agora);
+}
+/** Dono 14/11 ("V2 tá fazendo follow-up fora do horário. De sábado só às 9:30"): passo com hora marcada
+ *  que cai no sábado sai na leva das 9h30 (não às 17h30); se essa leva já passou, vai pra segunda na hora
+ *  marcada. Domingo nunca — segunda na hora marcada. */
+function ajustarFimDeSemana(d: Date, agora: Date): Date {
+  const s = sp(d);
+  if (s.dow === 0) return new Date(+d + 86400000);
+  if (s.dow === 6) {
+    const sab = emSp(s, 0, 9, 30);
+    return +sab > +agora ? sab : new Date(+d + 2 * 86400000);
+  }
   return d;
+}
+/** Passo com hora marcada pode sair agora? Seg–sex sim; sábado só na leva da manhã (9h30–15h30); domingo não. */
+export function horaMarcadaPodeSair(agora = new Date()) {
+  const s = sp(agora);
+  if (s.dow === 0) return false;
+  if (s.dow === 6) return janelaAberta(agora);
+  return true;
 }
 /** Quando o passo sai: com hora escolhida → aquela hora; senão a regra de sempre (encaixa na leva). */
 export function vencimentoDoPasso(p: Pick<Passo, 'baseAtraso' | 'atrasoMinutos' | 'dataHoraFixa' | 'horaEnvio'>, inscritoEm: Date, agora = new Date()): Date {
@@ -429,6 +447,11 @@ async function escolherLote(limite: number): Promise<Exec[]> {
     if (passo.soHorarioComercial && !emHorarioComercial(agora)) continue;
     // hora escolhida pelo corretor: sai na hora marcada, fora das levas
     if (ex.passoAtual > 0 && !passo.horaEnvio && !janelaAberta(agora)) continue;
+    // hora marcada que venceu no sábado à tarde / domingo (agendada antes dessa regra): remarca e não manda
+    if (ex.passoAtual > 0 && passo.horaEnvio && !horaMarcadaPodeSair(agora)) {
+      await db.update(followupExecucoes).set({ proximoEnvioEm: vencimentoComHora(passo, agora, true) }).where(eq(followupExecucoes.id, ex.id));
+      continue;
+    }
     if (!conectado.has(ex.corretorId)) conectado.set(ex.corretorId, await corretorConectado(ex.imobiliariaId, ex.corretorId));
     if (!conectado.get(ex.corretorId)) continue;
     const atual = porCorretor.get(ex.corretorId);

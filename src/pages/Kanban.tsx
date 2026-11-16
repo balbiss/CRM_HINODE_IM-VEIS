@@ -4,7 +4,7 @@ import { LayoutGrid, List as ListIcon, X, FileText, MoreVertical, ChevronLeft, C
 import { dataHoraCompleta, dataHoraCurta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { canalPill, fmtTelefone } from '../lib/format';
+import { canalPill, casaBuscaLead, fmtTelefone } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
 import { ChatAvatar } from '../components/ChatAvatar';
@@ -136,7 +136,7 @@ export default function Kanban() {
       });
     }
     const q = query.trim().toLowerCase();
-    if (q) base = base.filter(l => l.nome.toLowerCase().includes(q) || l.tel.includes(q));
+    if (q) base = base.filter(l => casaBuscaLead(l, q));
     return base;
   }, [allLeads, isManager, kbCorretor, meNome, filterCanal, kbTag, query, kbPrazo, colunas]);
   // trocou o filtro: lead marcado que saiu da tela deixa de estar marcado (não transfere o que não se vê)
@@ -361,9 +361,15 @@ export default function Kanban() {
           </div>
 
           <div className="kb-cols" style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 14, alignItems: 'flex-start' }}>
+            {!leads.length && !dragId && (
+              <div style={{ padding: '30px 4px' }}>
+                <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>Nenhum lead encontrado.</p>
+              </div>
+            )}
             {colunas.map((c, ci) => {
               const colLeadsTotal = leads.filter(l => l.colunaId === c.id);
-              if (!colLeadsTotal.length && !dragId && !query && highlightCol !== c.id) return null;
+              // dono 16/11: só aparecem as colunas que têm lead, com filtro E com pesquisa (vazias só ao arrastar um card)
+              if (!colLeadsTotal.length && !dragId && highlightCol !== c.id) return null;
               const visivel = visivelPorColuna[c.id] || LOTE_COLUNA;
               const colLeads = colLeadsTotal.slice(0, visivel);
               const isMobileActive = mobileCol === c.id;

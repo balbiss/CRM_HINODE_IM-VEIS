@@ -10,7 +10,7 @@ import { useRoleInfo } from '../lib/selectors';
 import { mapMsgs, type Lead } from '../lib/data';
 import { Visto } from '../components/Visto';
 import { ChatAvatar } from '../components/ChatAvatar';
-import { canalPill, dayLabel, diasAtras } from '../lib/format';
+import { canalPill, casaBuscaLead, dayLabel, diasAtras } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from '../components/AnexoMensagem';
@@ -98,7 +98,7 @@ export default function Conversas() {
     .filter(l => (isManager ? (convCorretor === 'Todos os corretores' || l.corretor === convCorretor) : l.corretor === meNome))
     .filter(l => !convTag || l.tags.includes(convTag))
     .filter(l => !convNumero || l.sessaoWhatsappId === convNumero)
-    .filter(l => !q || l.nome.toLowerCase().includes(q) || (q.replace(/\D/g, '') !== '' && l.tel.replace(/\D/g, '').includes(q.replace(/\D/g, ''))))
+    .filter(l => !q || casaBuscaLead(l, q))
     .sort((a, b) => new Date(conversaPorLead.get(b.id)!.enviadoEm).getTime() - new Date(conversaPorLead.get(a.id)!.enviadoEm).getTime()),
     [allLeads, conversaPorLead, isManager, convCorretor, meNome, q, convTag, convNumero]);
 
