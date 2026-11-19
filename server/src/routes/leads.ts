@@ -489,6 +489,21 @@ export function leadsRouter(io: SocketServer) {
         if (movido) { io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', movido); return res.json(movido); }
       }
     }
+    // Marcou VISITA no card → o card vai sozinho pra coluna AGENDADO (gerente 19/11). Não puxa de volta
+    // quem já está mais pra frente no funil (visitou, crédito, aprovado, FID, venda…) nem lead fora do funil.
+    if (rest.dataVisita && row.tipoVisita !== 'FID' && row.corretorId && !vendaFechada(row) && !row.vendaPendenteAprovacao && !row.descartadoEm) {
+      const colAgendado = await colunaPorSlug(imobiliariaId, 'visita');
+      const [colAtual] = row.colunaId ? await db.select({ slug: colunasKanban.slug }).from(colunasKanban).where(eq(colunasKanban.id, row.colunaId)).limit(1) : [];
+      const NAO_PUXA = ['visita', 'visitou', 'cobrar_doc', 'pendente', 'credito', 'aprovado', 'fid', 'reprovado', 'restricao', 'venda', 'descarte', 'descadastrar'];
+      if (colAgendado && row.colunaId !== colAgendado.id && !NAO_PUXA.includes(colAtual?.slug ?? '')) {
+        const [movido] = await db.update(leads).set({ colunaId: colAgendado.id, entrouNaColunaEm: new Date() }).where(eq(leads.id, row.id)).returning();
+        if (movido) {
+          Object.assign(row, movido);
+          registrarEvento(imobiliariaId, row.id, 'coluna', 'Movido para "AGENDADO" (visita marcada)', nome);
+          if (colAtual?.slug === 'followup_auto') void encerrarPorLead(io, imobiliariaId, row.id, 'visita agendada');
+        }
+      }
+    }
     io.to('imobiliaria:' + imobiliariaId).emit('lead:updated', row);
     res.json(row);
   });

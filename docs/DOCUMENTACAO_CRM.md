@@ -513,3 +513,9 @@ mandava esse pro histórico ("Respostas do formulário: ...").
 - Agenda → Calendário: bolinha por situação do compromisso do lead — Visita azul, FID verde, Desmarcou laranja, Furou vermelho, Reagendou roxo; compromisso da equipe amarelo. Legenda embaixo do calendário; bolinhas maiores e cores fortes (pedido do gerente).
 - Reagendar (nova data num lead que já tinha visita/FID do mesmo tipo, não realizada) grava status REAGENDADA em vez de AGENDADA — no card (LeadDetalhesOka) e ao mover o lead pra coluna que exige agendamento (server/src/routes/leads.ts). Como o lead só guarda uma data de compromisso, a data antiga some e só aparece a nova (roxa).
 - Arquivos: src/pages/Agenda.tsx (corVisita, LEGENDA), src/components/LeadDetalhesOka.tsx, server/src/routes/leads.ts.
+
+## 2026-11-19 — Visita marcada move o card pra AGENDADO
+
+- PATCH /api/leads/:id com dataVisita (tipo VISITA) move o lead sozinho pra coluna slug `visita` (AGENDADO) e registra "Movido para AGENDADO (visita marcada)" no histórico. Pedido do gerente: cliente com visita agendada não pode ficar em CONVERSANDO.
+- Não puxa de volta lead mais adiantado: visitou, cobrar_doc, pendente, credito, aprovado, fid, reprovado, restricao, venda, descarte, descadastrar. Também não move sem corretor, venda fechada/pendente ou descartado. FID não move.
+- Se saiu do FOLLOW-UP AUTOMÁTICO, encerra o robô (encerrarPorLead).
