@@ -1004,3 +1004,52 @@ export const mcpOauthTokens = pgTable('mcp_oauth_tokens', {
 }, table => ({
   perfilIdx: index('mcp_oauth_tokens_perfil_idx').on(table.perfilId),
 }));
+
+// ---------- Base de Conhecimento (só pra equipe) — routes/conhecimento.ts ----------
+// Dono/gerente cadastram; corretor consulta e pergunta pra IA ("Pergunte à IA").
+export const conhecimentoItens = pgTable('conhecimento_itens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  categoria: text('categoria').notNull(),
+  titulo: text('titulo').notNull(),
+  conteudo: text('conteudo').notNull().default(''),
+  anexoUrl: text('anexo_url'),
+  anexoNome: text('anexo_nome'),
+  // texto lido do PDF/foto pela IA (é isso que a IA usa pra responder)
+  anexoTexto: text('anexo_texto'),
+  anexoStatus: text('anexo_status'), // 'lendo' | 'ok' | 'erro'
+  criadoPor: uuid('criado_por').references(() => perfis.id, { onDelete: 'set null' }),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+  atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('conhecimento_itens_imob_idx').on(table.imobiliariaId),
+}));
+
+/** Regra do fluxo de pagamento da construtora — o sistema recalcula sozinho a cada mês (lib/fluxoPagamento.ts). */
+export const fluxosPagamento = pgTable('fluxos_pagamento', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  empreendimento: text('empreendimento').notNull(),
+  construtora: text('construtora').notNull().default(''),
+  config: jsonb('config').notNull().default({}),
+  observacoes: text('observacoes').notNull().default(''),
+  ativo: boolean('ativo').notNull().default(true),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+  atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('fluxos_pagamento_imob_idx').on(table.imobiliariaId),
+}));
+
+/** Histórico do "Pergunte à IA" — as sem resposta viram lista pro dono completar a base. */
+export const conhecimentoPerguntas = pgTable('conhecimento_perguntas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  imobiliariaId: uuid('imobiliaria_id').notNull().references(() => imobiliarias.id, { onDelete: 'cascade' }),
+  perfilId: uuid('perfil_id').references(() => perfis.id, { onDelete: 'set null' }),
+  pergunta: text('pergunta').notNull(),
+  resposta: text('resposta').notNull().default(''),
+  semResposta: boolean('sem_resposta').notNull().default(false),
+  resolvida: boolean('resolvida').notNull().default(false),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  imobIdx: index('conhecimento_perguntas_imob_idx').on(table.imobiliariaId),
+}));

@@ -18,6 +18,7 @@ import { EmojiPicker } from './EmojiPicker';
 import { AvisoJanelaOficial } from './WhatsappOficial';
 import { LeadDetalhesOka } from './LeadDetalhesOka';
 import { CriativoDoLead } from './CriativoDoLead';
+import { SimularFluxo } from './SimularFluxo';
 import { FollowupControles } from './FollowupDoLead';
 import { MensagensProntas } from './MensagensProntas';
 
@@ -72,6 +73,7 @@ export function LeadModal() {
   useEffect(() => { if (leadTab === 'historico' && leadId) fetchEventosLead(leadId); }, [leadTab, leadId, fetchEventosLead]);
 
   const [prontasAbertas, setProntasAbertas] = useState(false);
+  const [simularAberto, setSimularAberto] = useState(false);
   if (!L) return null;
 
   const colAtual = colunas.find(c => c.id === L.colunaId)?.titulo ?? '—';
@@ -229,12 +231,14 @@ export function LeadModal() {
                 
               </div>
               <AvisoJanelaOficial leadId={L.id} qtdMensagens={chatMsgs.length} />
+              {simularAberto && <SimularFluxo onUsarTexto={t => setDraft(t)} onFechar={() => setSimularAberto(false)} />}
               <BarraResposta leadId={L.id} msgs={(leadId && chats[leadId]) || []} leadNome={L.nome} />
               <div style={{ position: 'relative' }}>
                 <MensagensProntas draft={draft} setDraft={setDraft} leadId={L.id} leadNome={L.nome} aberto={prontasAbertas} onFechar={() => setProntasAbertas(false)} bottom={8} />
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
                 <button onClick={() => setProntasAbertas(v => !v)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>Mensagens prontas</button>
+                <button onClick={() => setSimularAberto(true)} style={{ padding: '6px 11px', border: '1px solid var(--line)', borderRadius: 20, background: 'none', fontSize: 12 }}>Simular fluxo</button>
                 <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>ou digite / no campo</span>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>

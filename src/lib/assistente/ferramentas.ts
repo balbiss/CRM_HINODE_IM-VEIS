@@ -79,7 +79,7 @@ const NOME_TELA: Record<string, string> = {
   '/templates': 'Templates', '/integracoes': 'Integrações', '/agente-ia': 'Agente de IA', '/relatorios': 'Relatórios',
   '/manual': 'Manual do CRM', '/configuracoes': 'Ajustes', '/equipe': 'Equipe', '/importacoes': 'Importar planilha',
   '/credito': 'Análise de crédito', '/avisos-corretor': 'Avisos por WhatsApp', '/site': 'Site de imóveis',
-  '/links-uteis': 'Links úteis', '/treinamentos': 'Treinamentos',
+  '/conhecimento': 'Base de Conhecimento', '/links-uteis': 'Links úteis', '/treinamentos': 'Treinamentos',
 };
 
 /** Texto visível de um elemento, sem espaços repetidos e com limite de tamanho. */

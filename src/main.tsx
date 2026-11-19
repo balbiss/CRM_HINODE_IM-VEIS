@@ -35,6 +35,7 @@ import Importacoes from './pages/Importacoes';
 import SiteImoveis from './pages/SiteImoveis';
 import Templates from './pages/Templates';
 import LinksUteis from './pages/LinksUteis';
+import Conhecimento from './pages/Conhecimento';
 import Treinamentos from './pages/Treinamentos';
 import Configuracoes from './pages/Configuracoes';
 import Denied from './pages/Denied';
@@ -77,6 +78,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="agente-ia" element={<AgenteIa />} />
           <Route path="importacoes" element={<Importacoes />} />
           <Route path="site" element={<SiteImoveis />} />
+          <Route path="conhecimento" element={<Conhecimento />} />
           <Route path="links-uteis" element={<LinksUteis />} />
           <Route path="treinamentos" element={<Treinamentos />} />
           <Route path="equipe" element={<Equipe />} />

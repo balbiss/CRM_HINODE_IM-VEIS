@@ -150,7 +150,7 @@ export const FERRAMENTAS: FunctionDeclaration[] = [
 
 const PAPEL: Record<string, string> = { dono: 'dono da imobiliária', gerente: 'gerente', corretor: 'corretor' };
 
-export function roteiro(o: { nomeAssistente: string; nomeUsuario: string; papel: string; nomeImob: string; memorias: { id: string; texto: string }[]; historico: { quem: string; texto: string }[] }) {
+export function roteiro(o: { nomeAssistente: string; nomeUsuario: string; papel: string; nomeImob: string; memorias: { id: string; texto: string }[]; historico: { quem: string; texto: string }[]; base?: string }) {
   const agora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   return [
     `Você é ${o.nomeAssistente}, o assistente de voz do CRM da imobiliária ${o.nomeImob}.`,
@@ -173,6 +173,9 @@ export function roteiro(o: { nomeAssistente: string; nomeUsuario: string; papel:
     '- Contexto da tela: você não vê a tela como imagem; pra saber o que o usuário está olhando, chame o_que_esta_na_tela. Quando ele se referir a algo sem dar nome ("esse lead", "manda pra ele", "o que acha desse relatório"), chame primeiro o_que_esta_na_tela e use o que vier dela.',
     '- Janelas: abrir_lead abre a ficha; fechar_janela fecha a ficha ou a janela aberta; fechar_paineis fecha só os seus painéis.',
     '- Você não tem acesso à internet, só ao CRM.',
+    o.base
+      ? 'BASE DE CONHECIMENTO da imobiliária (cadastrada pelo dono/gerente). Quando perguntarem sobre construtoras, empreendimentos, documentos, regras ou fluxo de pagamento, responda SÓ com isto; os fluxos já vêm calculados pro mês atual, use os números exatamente assim. Se não estiver aqui, diga que ainda não está cadastrado e que é pra confirmar com o gerente:\n' + o.base
+      : '',
     o.memorias.length
       ? 'Anotações que o usuário já pediu pra lembrar (mais recentes primeiro):\n' + o.memorias.map(m => `- ${m.texto}`).join('\n')
       : '',

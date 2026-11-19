@@ -5,6 +5,7 @@ import type { Request } from 'express';
 import { db } from '../db/client.js';
 import { assistenteMemorias, assistenteSessoes, imobiliarias, perfis } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { montarContexto } from './conhecimento.js';
 import { MODELO, VERSAO_API, VOZES, assistenteConfigurado, configSessao, criarTokenTemporario, roteiro } from '../lib/assistente.js';
 
 /** Início do mês corrente no horário de Brasília (a cota de minutos é mensal). */
@@ -91,9 +92,10 @@ assistenteRouter.post('/sessao', async (req, res) => {
   const memorias = await db.select({ id: assistenteMemorias.id, texto: assistenteMemorias.texto }).from(assistenteMemorias)
     .where(eq(assistenteMemorias.perfilId, sub)).orderBy(desc(assistenteMemorias.criadoEm)).limit(30);
   const historico = await historicoRecente(sub);
+  const base = await montarContexto(imobiliariaId, 30_000).catch(() => ({ txt: '', vazio: true }));
   const config = configSessao({
     voz: imob.assistenteVoz,
-    instrucoes: roteiro({ nomeAssistente: imob.assistenteNome, nomeUsuario: (eu?.nome || '').split(' ')[0] || 'usuário', papel: eu?.role || req.auth!.role, nomeImob: imob.nome, memorias, historico }),
+    instrucoes: roteiro({ nomeAssistente: imob.assistenteNome, nomeUsuario: (eu?.nome || '').split(' ')[0] || 'usuário', papel: eu?.role || req.auth!.role, nomeImob: imob.nome, memorias, historico, base: base.vazio ? '' : base.txt }),
   });
   let token: string;
   try { token = await criarTokenTemporario(config); } catch (e) {

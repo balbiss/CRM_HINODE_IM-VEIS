@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/agente-ia', label: 'Agente de IA', short: 'IA', mgrOnly: true, group: 'ferramentas' },
   { path: '/avisos-corretor', label: 'Avisos por WhatsApp', short: 'Avisos', mgrOnly: true, group: 'ferramentas' },
   { path: '/site', label: 'Site de Imóveis', short: 'Site', mgrOnly: true, group: 'ferramentas' },
+  { path: '/conhecimento', label: 'Base de Conhecimento', short: 'Base', group: 'ferramentas' },
   { path: '/links-uteis', label: 'Links Úteis', short: 'Links', group: 'ferramentas' },
   { path: '/treinamentos', label: 'Treinamentos', short: 'Cursos', group: 'ferramentas' },
   { path: '/manual', label: 'Manual do CRM', short: 'Manual', group: 'ferramentas' },
