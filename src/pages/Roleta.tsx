@@ -18,12 +18,10 @@ export default function Roleta() {
   const roletas = useAppStore(s => s.roletas);
   const perfis = useAppStore(s => s.perfisRemotos);
   const sessoes = useAppStore(s => s.sessoesWhatsapp);
-  const leads = useAppStore(s => s.leads);
   const criarRoleta = useAppStore(s => s.criarRoleta);
   const atualizarRoleta = useAppStore(s => s.atualizarRoleta);
   const excluirRoleta = useAppStore(s => s.excluirRoleta);
   const setMembros = useAppStore(s => s.setMembrosRoleta);
-  const distribuir = useAppStore(s => s.distribuirPendentes);
   const shuffle = useAppStore(s => s.shuffle);
   const toggleMeuPlantao = useAppStore(s => s.toggleMeuPlantao);
   const ask = useAppStore(s => s.ask);
@@ -36,7 +34,6 @@ export default function Roleta() {
   const [criando, setCriando] = useState(false);
   const novaRef = useRef<HTMLInputElement>(null);
   const salvarNova = () => { const n = novaRoleta.trim(); if (!n) { novaRef.current?.focus(); return; } criarRoleta(n); setNovaRoleta(''); setCriando(false); };
-  const semCorretor = leads.filter(l => l.col === 'novo' && !l.corretor).length;
   const corretores = useMemo(() => perfis.filter(p => p.role === 'corretor' || p.role === 'gerente'), [perfis]);
   const nomeSessao = (id: string | null) => {
     if (!id) return null;
@@ -65,11 +62,7 @@ export default function Roleta() {
               {me?.emPlantao ? 'No plantão — sair' : 'Entrar no plantão'}
             </button>
           )}
-          {isManager && semCorretor > 0 && (
-            <button onClick={distribuir} style={{ padding: '11px 18px', border: 'none', borderRadius: 8, background: 'var(--olive)', color: '#fff', fontSize: 13, fontWeight: 600 }}>
-              Distribuir {semCorretor} lead{semCorretor > 1 ? 's' : ''} sem corretor
-            </button>
-          )}
+          {/* botão 'Distribuir N leads sem corretor' removido a pedido do dono (19/11): jogava milhares de leads antigos de uma vez na roleta */}
           {isManager && <button onClick={shuffle} style={{ padding: '11px 18px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--card)', fontSize: 13, fontWeight: 600 }}>Embaralhar</button>}
         </div>
       </div>

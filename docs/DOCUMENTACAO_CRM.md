@@ -519,3 +519,7 @@ mandava esse pro histórico ("Respostas do formulário: ...").
 - PATCH /api/leads/:id com dataVisita (tipo VISITA) move o lead sozinho pra coluna slug `visita` (AGENDADO) e registra "Movido para AGENDADO (visita marcada)" no histórico. Pedido do gerente: cliente com visita agendada não pode ficar em CONVERSANDO.
 - Não puxa de volta lead mais adiantado: visitou, cobrar_doc, pendente, credito, aprovado, fid, reprovado, restricao, venda, descarte, descadastrar. Também não move sem corretor, venda fechada/pendente ou descartado. FID não move.
 - Se saiu do FOLLOW-UP AUTOMÁTICO, encerra o robô (encerrarPorLead).
+
+## 2026-11-19 — Removido botão "Distribuir N leads sem corretor" (Roletas)
+
+- Pedido do dono: o botão na tela de Roletas jogava de uma vez todos os leads sem corretor da coluna LEAD NOVO (3.347) na roleta — perigoso. Removido do front (src/pages/Roleta.tsx). Distribuição de leads parados continua pelo Bolsão / Importações, com escolha do que distribuir.
