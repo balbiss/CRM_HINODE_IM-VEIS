@@ -506,3 +506,10 @@ mandava esse pro histórico ("Respostas do formulário: ...").
 - Rotas: `/api/conhecimento/itens` (CRUD + `/:id/reler`), `/fluxos` (CRUD, lista já traz `calculo` do mês), `/fluxos/calcular` (prévia do editor), `/fluxos/:id/simular` (valores do cliente → resultado + texto pronto), `/perguntar`, `/perguntas` (gestor).
 - Front: `src/pages/Conhecimento.tsx` (abas Pergunte à IA / Base / Fluxos / Sem resposta), `src/components/SimularFluxo.tsx` (usado na página e no botão "Simular fluxo" do chat do card, que joga o texto no rascunho).
 - Assistente de voz: recebe a base (até 30 mil caracteres) no roteiro e responde por ela.
+
+
+## 2026-11-19 — Cores do Calendário (igual à v1)
+
+- Agenda → Calendário: bolinha por situação do compromisso do lead — Visita azul, FID verde, Desmarcou laranja, Furou vermelho, Reagendou roxo; compromisso da equipe amarelo. Legenda embaixo do calendário; bolinhas maiores e cores fortes (pedido do gerente).
+- Reagendar (nova data num lead que já tinha visita/FID do mesmo tipo, não realizada) grava status REAGENDADA em vez de AGENDADA — no card (LeadDetalhesOka) e ao mover o lead pra coluna que exige agendamento (server/src/routes/leads.ts). Como o lead só guarda uma data de compromisso, a data antiga some e só aparece a nova (roxa).
+- Arquivos: src/pages/Agenda.tsx (corVisita, LEGENDA), src/components/LeadDetalhesOka.tsx, server/src/routes/leads.ts.

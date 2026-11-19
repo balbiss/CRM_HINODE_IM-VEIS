@@ -151,7 +151,12 @@ export function leadsRouter(io: SocketServer) {
       if (!visita || +visita <= agora) {
         return res.status(409).json({ error: '"' + col.titulo + '" exige a data e o horário do compromisso.', motivo: 'agendamento' });
       }
-      if (dataVisita) Object.assign(extra, { dataVisita: visita, tipoVisita: tipoVisita ?? (col.slug === 'fid' ? 'FID' : 'VISITA'), statusVisita: 'AGENDADA' });
+      if (dataVisita) {
+        // já tinha compromisso do mesmo tipo (não realizado) e mudou a data = reagendou (roxo no calendário)
+        const tipoNovo = tipoVisita ?? (col.slug === 'fid' ? 'FID' : 'VISITA');
+        const reagendou = !!antes.dataVisita && antes.statusVisita !== 'REALIZADA' && (antes.tipoVisita || 'VISITA') === tipoNovo && +antes.dataVisita !== +visita;
+        Object.assign(extra, { dataVisita: visita, tipoVisita: tipoNovo, statusVisita: reagendou ? 'REAGENDADA' : 'AGENDADA' });
+      }
     } else if (col.slug && SLUGS_EXIGEM_PROXIMO_CONTATO.includes(col.slug)) {
       const prox = proximoContatoEm ? new Date(proximoContatoEm) : antes.proximoContatoEm;
       if (!prox || +prox <= agora) {

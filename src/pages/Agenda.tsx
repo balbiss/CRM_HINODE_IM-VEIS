@@ -17,6 +17,19 @@ const chave = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padS
 const hora = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
+/** Cores das bolinhas do calendário iguais à v1 (gerente 19/11): visita azul, FID verde, desmarcou laranja,
+ *  furou vermelho, reagendou roxo. Compromisso da equipe segue amarelo. */
+const COR_COMP = '#CA8A04';
+const LEGENDA: [string, string][] = [['Visita', '#1D4ED8'], ['FID', '#15803D'], ['Desmarcou', '#EA580C'], ['Furou', '#B91C1C'], ['Reagendou', '#7E22CE'], ['Compromisso', COR_COMP]];
+function corVisita(l?: Lead) {
+  const st = l?.statusVisita || 'AGENDADA';
+  if (st === 'FURO') return '#B91C1C';
+  if (st === 'DESMARCADA') return '#EA580C';
+  if (st === 'REAGENDADA') return '#7E22CE';
+  return (l?.tipoVisita || 'VISITA') === 'FID' ? '#15803D' : '#1D4ED8';
+}
+const ROTULO_STATUS: Record<string, string> = { AGENDADA: 'Agendada', REALIZADA: 'Realizada', DESMARCADA: 'Desmarcou', REAGENDADA: 'Reagendou', FURO: 'Furou' };
+
 type Item = { id: string; quando: string; tipo: 'visita' | 'compromisso' | 'contato' | 'tarefa'; titulo: string; sub: string; leadId?: string; comp?: Compromisso; robo?: string | null; lead?: Lead };
 
 export default function Agenda() {
@@ -59,7 +72,7 @@ export default function Agenda() {
   const itens: Item[] = useMemo(() => {
     const out: Item[] = [];
     for (const l of ativos) {
-      if (l.dataVisita) out.push({ id: 'v' + l.id, quando: l.dataVisita, tipo: 'visita', titulo: (l.tipoVisita || 'VISITA') + ' · ' + l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (l.statusVisita || 'AGENDADA'), leadId: l.id, lead: l });
+      if (l.dataVisita) out.push({ id: 'v' + l.id, quando: l.dataVisita, tipo: 'visita', titulo: (l.tipoVisita || 'VISITA') + ' · ' + l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (ROTULO_STATUS[l.statusVisita || 'AGENDADA'] ?? l.statusVisita), leadId: l.id, lead: l });
       // lead com o robô rodando não entra nas tarefas (quem cuida dele é o follow-up)
       if (l.proximoContatoEm && l.colunaId !== colFollow) out.push({ id: 'c' + l.id, quando: l.proximoContatoEm, tipo: 'contato', titulo: l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (colunas.find(c => c.id === l.colunaId)?.titulo ?? ''), leadId: l.id, lead: l });
     }
@@ -91,11 +104,11 @@ export default function Agenda() {
   const ordemDia = (a: Item, b: Item) => (a.tipo === 'visita' || a.tipo === 'compromisso' ? 0 : 1) - (b.tipo === 'visita' || b.tipo === 'compromisso' ? 0 : 1) || +new Date(a.quando) - +new Date(b.quando);
   const doDia = itensCal.filter(i => chave(new Date(i.quando)) === diaSel).sort(ordemDia);
   const marcas = useMemo(() => {
-    const m = new Map<string, { visita: boolean; comp: boolean; n: number }>();
+    const m = new Map<string, { cores: string[]; comp: boolean; n: number }>();
     for (const i of itensCal) {
       const k = chave(new Date(i.quando));
-      const x = m.get(k) ?? { visita: false, comp: false, n: 0 };
-      if (i.tipo === 'visita') x.visita = true; else if (i.tipo === 'compromisso') x.comp = true; else x.n++;
+      const x = m.get(k) ?? { cores: [], comp: false, n: 0 };
+      if (i.tipo === 'visita') { const c = corVisita(i.lead); if (!x.cores.includes(c)) x.cores.push(c); } else if (i.tipo === 'compromisso') x.comp = true; else x.n++;
       m.set(k, x);
     }
     return m;
@@ -116,7 +129,7 @@ export default function Agenda() {
         <button onClick={() => (i.comp ? setVerComp(i.comp) : i.leadId && openLead(i.leadId))}
           style={{ display: 'flex', gap: 12, alignItems: 'center', flex: '1 1 260px', minWidth: 0, textAlign: 'left', padding: 0, border: 'none', background: 'none' }}>
           <span style={{ width: comData ? 92 : 48, fontSize: 12, color: atrasado ? '#DC2626' : 'var(--muted)', fontWeight: atrasado ? 700 : 400, flex: 'none' }}>{comData ? dataCurta(i.quando) + ' ' : ''}{hora(i.quando)}</span>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: i.tipo === 'visita' ? '#A855F7' : i.tipo === 'compromisso' ? '#CA8A04' : i.tipo === 'tarefa' ? 'var(--olive)' : 'var(--terra)' }} />
+          <span style={{ width: 10, height: 10, borderRadius: '50%', flex: 'none', background: i.tipo === 'visita' ? corVisita(i.lead) : i.tipo === 'compromisso' ? COR_COMP : i.tipo === 'tarefa' ? 'var(--olive)' : 'var(--terra)' }} />
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.titulo}</span>
             <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -198,14 +211,17 @@ export default function Agenda() {
                 return (
                   <button key={i} onClick={() => setDiaSel(c.key)} style={{ minHeight: 48, borderRadius: 8, border: '1px solid ' + (sel ? 'var(--terra)' : 'var(--line)'), background: sel ? 'var(--terraSoft)' : c.key === hoje ? 'var(--bg)' : 'none', padding: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
                     <span style={{ fontSize: 12.5, fontWeight: c.key === hoje ? 700 : 500 }}>{c.n}</span>
-                    <span style={{ display: 'flex', gap: 3 }}>
-                      {m?.visita && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#A855F7' }} />}
-                      {m?.comp && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#CA8A04' }} />}
+                    <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {m?.cores.map(c => <span key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c }} />)}
+                      {m?.comp && <span style={{ width: 10, height: 10, borderRadius: '50%', background: COR_COMP }} />}
                       {!!m?.n && <span style={{ fontSize: 9.5, color: 'var(--muted)' }}>{m.n}</span>}
                     </span>
                   </button>
                 );
               })}
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 11.5, color: 'var(--muted)' }}>
+              {LEGENDA.map(([t, c]) => <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: '50%', background: c }} />{t}</span>)}
             </div>
           </div>
           {bloco('Agenda de ' + diaSel.split('-').reverse().join('/'), doDia, 'var(--terra)', false)}

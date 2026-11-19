@@ -152,7 +152,9 @@ export function LeadDetalhesOka({ lead: L }: { lead: Lead }) {
                   disabled={!vData || !vHora}
                   onClick={async () => {
                     const tipo = (document.getElementById('tipo-' + L.id) as HTMLSelectElement | null)?.value ?? 'VISITA';
-                    if (await patchLead(L.id, { dataVisita: isoLocal(vData, vHora), tipoVisita: tipo, statusVisita: 'AGENDADA' })) { setVData(''); setVHora(''); }
+                    // já tinha compromisso do mesmo tipo (não realizado) = reagendou: fica roxo no calendário e a data antiga some
+                    const reagendou = !!L.dataVisita && L.statusVisita !== 'REALIZADA' && (L.tipoVisita || 'VISITA') === tipo;
+                    if (await patchLead(L.id, { dataVisita: isoLocal(vData, vHora), tipoVisita: tipo, statusVisita: reagendou ? 'REAGENDADA' : 'AGENDADA' })) { setVData(''); setVHora(''); }
                   }}
                   style={{ ...btnPrim, opacity: vData && vHora ? 1 : 0.5 }}
                 >{L.dataVisita ? 'Reagendar' : 'Agendar'}</button>
