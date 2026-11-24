@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { sessoesWhatsapp, imobiliarias, perfis, leads, colunasKanban, mensagensWhatsapp, contatosIgnorados } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
-import { wahaConfigurado, criarSessao, pararSessao, statusSessao, qrSessao, webhookSecret, fotoPerfil, baixarMidiaMensagem } from '../lib/waha.js';
+import { wahaConfigurado, criarSessao, pararSessao, statusSessao, qrSessao, webhookSecret, fotoPerfil, baixarMidiaMensagem, lidParaTelefone } from '../lib/waha.js';
 import { uploadFile } from '../lib/storage.js';
 import { distribuirLead } from '../lib/roleta.js';
 import { configIa, iniciarIa, ehEcoDaIa, pausarIa, mensagemDoCliente, clienteAguardandoCorretor, transcreverAudio } from '../lib/agenteIa.js';
@@ -115,10 +115,18 @@ export function whatsappRouter(io: SocketServer) {
       //  - WEBJS/NOWEB: _data.key.remoteJidAlt / _data.author
       let numeroRaw = enderecoRaw;
       if (/@lid$/i.test(enderecoRaw)) {
-        const alt = (fromMe ? info.RecipientAlt : info.SenderAlt)
+        let alt: string = (fromMe ? info.RecipientAlt : info.SenderAlt)
           || info.SenderAlt || info.RecipientAlt
           || p._data?.key?.remoteJidAlt || p._data?.author || '';
-        if (!/@s\.whatsapp\.net|@c\.us/i.test(alt)) return;
+        // Evento sem o número junto (aconteceu com lead da Mariana 24/11: todas as respostas
+        // sumiam) → pergunta pro WAHA qual telefone é esse @lid em vez de descartar.
+        if (!/@s\.whatsapp\.net|@c\.us/i.test(alt) && ev.session) {
+          alt = (await lidParaTelefone(ev.session, enderecoRaw)) || '';
+        }
+        if (!/@s\.whatsapp\.net|@c\.us/i.test(alt)) {
+          console.warn('webhook WAHA: @lid sem telefone, mensagem ignorada', ev.session, enderecoRaw);
+          return;
+        }
         numeroRaw = alt;
       }
       const numero = soDigitos(numeroRaw);

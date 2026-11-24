@@ -131,6 +131,24 @@ export async function resolverLid(sessionName: string, numero: string): Promise<
   }
 }
 
+/** Converte um @lid (id interno do WhatsApp) no telefone real ("5512...@c.us") pela tabela
+ *  de LIDs da própria sessão no WAHA. Usado quando a mensagem chega com @lid e o evento NÃO
+ *  traz o número junto (SenderAlt/remoteJidAlt vazios) — antes disso a mensagem era descartada.
+ *  null = não deu pra resolver. Cache curto em memória (o par lid↔telefone não muda). */
+const cacheLid = new Map<string, string>();
+export async function lidParaTelefone(sessionName: string, lid: string): Promise<string | null> {
+  const chave = sessionName + '|' + lid;
+  if (cacheLid.has(chave)) return cacheLid.get(chave)!;
+  try {
+    const r = await waha<{ pn?: string | null }>(`/api/${encodeURIComponent(sessionName)}/lids/${encodeURIComponent(lid)}`);
+    const pn = r?.pn && /@c\.us|@s\.whatsapp\.net/i.test(r.pn) ? r.pn : null;
+    if (pn) { if (cacheLid.size > 5000) cacheLid.clear(); cacheLid.set(chave, pn); }
+    return pn;
+  } catch {
+    return null;
+  }
+}
+
 /** Confere se o número existe no WhatsApp antes de mandar a 1ª mensagem da régua.
  *  true = existe, false = não existe, null = não deu pra checar (WAHA fora / sessão off). */
 export async function checarNumero(sessionName: string, numero: string): Promise<boolean | null> {
