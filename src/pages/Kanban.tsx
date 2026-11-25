@@ -4,7 +4,7 @@ import { LayoutGrid, List as ListIcon, X, FileText, MoreVertical, ChevronLeft, C
 import { dataHoraCompleta, dataHoraCurta } from '../lib/datas';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
-import { canalPill, casaBuscaLead, fmtTelefone } from '../lib/format';
+import { canalPill, filtrarBuscaLeads, fmtTelefone } from '../lib/format';
 import { css } from '../lib/css';
 import { CardTagBar } from '../components/CardTagBar';
 import { ChatAvatar } from '../components/ChatAvatar';
@@ -136,7 +136,7 @@ export default function Kanban() {
       });
     }
     const q = query.trim().toLowerCase();
-    if (q) base = base.filter(l => casaBuscaLead(l, q));
+    if (q) base = filtrarBuscaLeads(base, q);
     return base;
   }, [allLeads, isManager, kbCorretor, meNome, filterCanal, kbTag, query, kbPrazo, colunas]);
   // trocou o filtro: lead marcado que saiu da tela deixa de estar marcado (não transfere o que não se vê)

@@ -4,7 +4,7 @@ import { useAppStore } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
 import { MOTIVOS_DESCARTE_EXTREMO, type Lead } from '../lib/data';
 import { dataHoraCurta } from '../lib/datas';
-import { casaBuscaLead } from '../lib/format';
+import { casaBuscaLead, normalizarBusca } from '../lib/format';
 import type { BolsaoTab } from '../store/appStore';
 
 /** Distribuição de Leads (v1): 6 abas pra dono/gerente; corretor usa o "+ Mais Rebatidas". */
@@ -51,7 +51,7 @@ export default function Bolsao() {
 
   const filtroTexto = (l: Lead) => {
     const q = query.trim().toLowerCase();
-    if (q && !(casaBuscaLead(l, q) || l.corretor.toLowerCase().includes(q))) return false;
+    if (q && !(casaBuscaLead(l, q) || normalizarBusca(l.corretor).includes(normalizarBusca(q)))) return false;
     if (cidade && norm(l.bairroInteresse) !== norm(cidade)) return false;
     return true;
   };

@@ -10,7 +10,7 @@ import { useRoleInfo } from '../lib/selectors';
 import { mapMsgs, type Lead } from '../lib/data';
 import { Visto } from '../components/Visto';
 import { ChatAvatar } from '../components/ChatAvatar';
-import { canalPill, casaBuscaLead, dayLabel, diasAtras } from '../lib/format';
+import { canalPill, filtrarBuscaLeads, dayLabel, diasAtras } from '../lib/format';
 import { css } from '../lib/css';
 import { uploadArquivo, tipoDeArquivo } from '../lib/upload';
 import { AnexoMensagem } from '../components/AnexoMensagem';
@@ -93,12 +93,12 @@ export default function Conversas() {
     return n ? (n.rotulo || (n.numero ? '+' + n.numero : 'Número')) : null;
   };
   const [convNumero, setConvNumero] = useState('');
-  const convBase = useMemo(() => allLeads
+  const convBase = useMemo(() => filtrarBuscaLeads(allLeads
     .filter(l => conversaPorLead.has(l.id))
     .filter(l => (isManager ? (convCorretor === 'Todos os corretores' || l.corretor === convCorretor) : l.corretor === meNome))
     .filter(l => !convTag || l.tags.includes(convTag))
     .filter(l => !convNumero || l.sessaoWhatsappId === convNumero)
-    .filter(l => !q || casaBuscaLead(l, q))
+    , q)
     .sort((a, b) => new Date(conversaPorLead.get(b.id)!.enviadoEm).getTime() - new Date(conversaPorLead.get(a.id)!.enviadoEm).getTime()),
     [allLeads, conversaPorLead, isManager, convCorretor, meNome, q, convTag, convNumero]);
 

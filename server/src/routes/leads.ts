@@ -587,6 +587,23 @@ export function leadsRouter(io: SocketServer) {
     );
   }
 
+  // Calendário da equipe (Vitor 25/11): todo mundo vê as visitas/FID marcadas de todos os corretores, pra
+  // saber quem está ocupado em qual horário. Corretor não vê nome/telefone do lead dos outros — só quem,
+  // quando, tipo e situação.
+  router.get('/agenda-equipe', async (req, res) => {
+    const { imobiliariaId, role, sub } = req.auth!;
+    const rows = await db.select({
+      id: leads.id, nome: leads.nome, corretorId: leads.corretorId, corretorNome: perfis.nome,
+      dataVisita: leads.dataVisita, tipoVisita: leads.tipoVisita, statusVisita: leads.statusVisita,
+    }).from(leads).innerJoin(perfis, eq(perfis.id, leads.corretorId))
+      .where(and(eq(leads.imobiliariaId, imobiliariaId), isNull(leads.descartadoEm), eq(leads.importacaoPendente, false),
+        sql`${leads.dataVisita} between now() - interval '62 days' and now() + interval '180 days'`));
+    const verTudo = role !== 'corretor';
+    res.json(rows.map(r => ({
+      ...r, id: verTudo || r.corretorId === sub ? r.id : null, nome: verTudo || r.corretorId === sub ? r.nome : null,
+    })));
+  });
+
   router.get('/rebatidas/status', async (req, res) => {
     const { imobiliariaId, sub } = req.auth!;
     res.json(await statusRebatidas(imobiliariaId, sub));

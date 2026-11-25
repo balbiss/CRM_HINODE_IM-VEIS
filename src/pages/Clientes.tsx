@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRoleInfo, scopeLeads } from '../lib/selectors';
-import { BRL, casaBuscaLead } from '../lib/format';
+import { BRL, filtrarBuscaLeads } from '../lib/format';
 import { ChatAvatar } from '../components/ChatAvatar';
 
 function statusOf(col: string) {
@@ -20,7 +20,7 @@ export default function Clientes() {
   const leads = useMemo(() => {
     const scoped = scopeLeads(allLeads, isManager, meNome);
     const q = query.trim().toLowerCase();
-    return q ? scoped.filter(l => casaBuscaLead(l, q)) : scoped;
+    return filtrarBuscaLeads(scoped, q);
   }, [allLeads, isManager, meNome, query]);
 
   return (

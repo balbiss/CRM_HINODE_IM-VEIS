@@ -1,4 +1,5 @@
-import { fmtTelefone } from '../lib/format';
+import { fmtTelefone, normalizarBusca, casaBuscaLead } from '../lib/format';
+import { apiFetch } from '../lib/api';
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore, type Compromisso } from '../store/appStore';
 import { useRoleInfo } from '../lib/selectors';
@@ -30,6 +31,7 @@ function corVisita(l?: Lead) {
 }
 const ROTULO_STATUS: Record<string, string> = { AGENDADA: 'Agendada', REALIZADA: 'Realizada', DESMARCADA: 'Desmarcou', REAGENDADA: 'Reagendou', FURO: 'Furou' };
 
+type VisitaEquipe = { id: string | null; nome: string | null; corretorId: string; corretorNome: string | null; dataVisita: string | null; tipoVisita: string | null; statusVisita: string | null };
 type Item = { id: string; quando: string; tipo: 'visita' | 'compromisso' | 'contato' | 'tarefa'; titulo: string; sub: string; leadId?: string; comp?: Compromisso; robo?: string | null; lead?: Lead };
 
 export default function Agenda() {
@@ -50,11 +52,23 @@ export default function Agenda() {
   const move = useAppStore(s => s.move);
   const patchLead = useAppStore(s => s.patchLead);
   useEffect(() => { fetchTarefas(); fetchCompromissos(); }, [fetchTarefas, fetchCompromissos]);
+  const token = useAppStore(s => s.token);
   // relógio da tela: passou do horário marcado e ninguém mexeu → vai pra Atrasadas sozinho (gerente 11-09)
   const [agora, setAgora] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setAgora(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   const [aba, setAba] = useState<'tarefas' | 'calendario'>('tarefas');
+  // Calendário da equipe (Vitor 25/11): o corretor também vê as visitas/FID dos colegas (só quem e
+  // quando, sem o nome do lead), pra saber se o Oka ou o Vitor já estão ocupados naquele horário.
+  const [equipe, setEquipe] = useState<VisitaEquipe[]>([]);
+  useEffect(() => {
+    if (isManager || aba !== 'calendario' || !token) return;
+    let vivo = true;
+    const buscar = () => apiFetch<VisitaEquipe[]>('/api/leads/agenda-equipe', token).then(r => { if (vivo) setEquipe(r); }).catch(() => {});
+    buscar();
+    const t = setInterval(buscar, 60000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [isManager, aba, token]);
   const [filtroCorretor, setFiltroCorretor] = useState('');
   // busca nas Tarefas por nome ou telefone (dono 13/11)
   const [busca, setBusca] = useState('');
@@ -76,6 +90,11 @@ export default function Agenda() {
       // lead com o robô rodando não entra nas tarefas (quem cuida dele é o follow-up)
       if (l.proximoContatoEm && l.colunaId !== colFollow) out.push({ id: 'c' + l.id, quando: l.proximoContatoEm, tipo: 'contato', titulo: l.nome, sub: (isManager ? l.corretor + ' · ' : '') + (colunas.find(c => c.id === l.colunaId)?.titulo ?? ''), leadId: l.id, lead: l });
     }
+    for (const v of equipe) {
+      if (!v.dataVisita || v.corretorId === me?.id) continue; // as minhas já vieram dos meus leads
+      const pseudo = { tipoVisita: v.tipoVisita, statusVisita: v.statusVisita } as Lead;
+      out.push({ id: 'e' + v.corretorId + v.dataVisita, quando: v.dataVisita, tipo: 'visita', titulo: (v.tipoVisita || 'VISITA') + ' · ' + (v.corretorNome || 'Corretor'), sub: 'Agenda da equipe · ' + (ROTULO_STATUS[v.statusVisita || 'AGENDADA'] ?? v.statusVisita), lead: pseudo });
+    }
     for (const c of compromissos) out.push({ id: 'p' + c.id, quando: c.inicio, tipo: 'compromisso', titulo: c.titulo, sub: [c.tipo, c.local].filter(Boolean).join(' · '), comp: c });
     for (const t of tarefas) {
       if (t.concluida) continue;
@@ -85,14 +104,15 @@ export default function Agenda() {
     }
     return out.sort((a, b) => +new Date(a.quando) - +new Date(b.quando));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ativos, compromissos, tarefas, colFollow, colunas, isManager, filtroCorretor, me?.id]);
+  }, [ativos, equipe, compromissos, tarefas, colFollow, colunas, isManager, filtroCorretor, me?.id]);
 
   const hoje = chave(new Date());
-  const termo = busca.trim().toLowerCase();
+  const termo = normalizarBusca(busca);
   const digitos = busca.replace(/[^0-9]/g, '');
-  const casaBusca = (i: Item) => !termo || [i.titulo, i.sub, i.lead?.nome].some(t => (t ?? '').toLowerCase().includes(termo))
+  const casaBusca = (i: Item) => !termo || [i.titulo, i.sub, i.lead?.nome].some(t => normalizarBusca(t ?? '').includes(termo))
+    || (!!i.lead && casaBuscaLead(i.lead, termo))
     || (digitos.length >= 3 && (i.lead?.tel ?? '').replace(/[^0-9]/g, '').includes(digitos));
-  const itensTarefas = itens.filter(casaBusca);
+  const itensTarefas = itens.filter(i => !i.id.startsWith('e') && casaBusca(i)); // visita de colega só no Calendário
   const contatos = itensTarefas.filter(i => i.tipo === 'contato' || i.tipo === 'tarefa');
   // contato/tarefa atrasa pelo HORÁRIO (não só pelo dia): marcado 10h e ninguém mexeu até 10h → Atrasadas
   const atrasadas = contatos.filter(i => +new Date(i.quando) < agora);
